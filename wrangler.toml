@@ -1,0 +1,21 @@
+name = "bixi-monitor"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+
+# Poll the GBFS feed every minute. (Cron Triggers minimum granularity.)
+[triggers]
+crons = ["* * * * *"]
+
+# D1 (SQLite). For local dev wrangler uses a local copy and ignores database_id.
+# Before `wrangler deploy`: run `wrangler d1 create bixi345` and paste the real
+# database_id below (it also prints the exact block to copy).
+[[d1_databases]]
+binding = "DB"
+database_name = "bixi345"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# Serve the built dashboard (Vite output) as static assets. Requests that don't
+# match a file fall through to the Worker's fetch handler (which owns /api/*).
+[assets]
+directory = "./dist"
+binding = "ASSETS"

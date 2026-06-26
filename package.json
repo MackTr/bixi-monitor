@@ -1,0 +1,21 @@
+{
+  "name": "bixi-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Monitor + analytics for BIXI station 345 (Regina / de Verdun), on Cloudflare Workers + D1.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "wrangler dev",
+    "watch:web": "vite build --watch",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply bixi345 --local",
+    "db:migrate": "wrangler d1 migrations apply bixi345 --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

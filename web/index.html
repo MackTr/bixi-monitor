@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e16" />
+    <title>BIXI · Regina / de Verdun</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚲</text></svg>" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="topbar__id">
+          <span class="dot" id="liveDot" aria-hidden="true"></span>
+          <div>
+            <h1 id="stationName">Regina / de Verdun</h1>
+            <p class="muted" id="stationMeta">BIXI station 345 · Verdun</p>
+          </div>
+        </div>
+        <p class="muted updated" id="updated">—</p>
+      </header>
+
+      <!-- NOW -->
+      <section class="card hero" id="hero" aria-live="polite">
+        <div class="hero__loading">Loading current status…</div>
+      </section>
+
+      <!-- TODAY -->
+      <section class="card">
+        <div class="card__head">
+          <h2 id="todayTitle">When bikes run out</h2>
+          <div class="toggle" role="tablist" id="todayToggle">
+            <button data-view="focus" class="is-active" role="tab">run-out window</button>
+            <button data-view="full" role="tab">24h</button>
+          </div>
+        </div>
+        <div id="today" class="chart"></div>
+        <div class="legend legend--row">
+          <span><i class="swatch swatch--empty"></i>empty</span>
+          <span><i class="swatch swatch--full"></i>full</span>
+          <span id="todayRange" class="muted"></span>
+        </div>
+      </section>
+
+      <!-- PATTERNS -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Patterns <span class="muted">· when does it run dry?</span></h2>
+          <div class="head-controls">
+            <div class="toggle" role="tablist" id="heatWindow">
+              <button data-hwin="focus" class="is-active" role="tab">run-out</button>
+              <button data-hwin="full" role="tab">24h</button>
+            </div>
+            <div class="toggle" role="tablist" id="heatToggle">
+              <button data-metric="pctEmpty" class="is-active" role="tab">% empty</button>
+              <button data-metric="avgBikes" role="tab">avg bikes</button>
+            </div>
+          </div>
+        </div>
+        <div id="heatmap" class="chart"></div>
+      </section>
+
+      <div class="grid2">
+        <!-- STATS -->
+        <section class="card">
+          <div class="card__head"><h2>Weekday mornings</h2></div>
+          <div id="stats" class="stats"></div>
+        </section>
+
+        <!-- EPISODES -->
+        <section class="card">
+          <div class="card__head"><h2>Recent episodes</h2></div>
+          <div id="episodes" class="episodes"></div>
+        </section>
+      </div>
+
+      <footer class="foot muted">
+        Data: BIXI GBFS · collected every minute · times in Montréal (America/Toronto)
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
