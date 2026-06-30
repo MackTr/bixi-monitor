@@ -12,7 +12,7 @@ crons = ["* * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "bixi345"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "59ccb2b5-2201-4933-8731-e391cba195c2"
 
 # Serve the built dashboard (Vite output) as static assets. Requests that don't
 # match a file fall through to the Worker's fetch handler (which owns /api/*).
