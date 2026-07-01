@@ -20,6 +20,8 @@
   --bike: #5bd1c0; /* mechanical fill */
   --ebike: #8b8bff; /* ebike fill */
   --trailer: #fb923c; /* trailer (GBFS cargo_bicycle) fill */
+  --unavail: #ef4444; /* out-of-service dock */
+  --broken: #5b647d; /* out-of-service (disabled) bike */
   --accent: #ff5a5f; /* BIXI coral */
 
   --r: 16px;
@@ -242,8 +244,23 @@ body {
 .occ__seg.trailer {
   background: var(--trailer);
 }
+.occ__seg.broken {
+  background: var(--broken);
+}
+.occ__seg.unavail {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--unavail) 0 3px,
+    color-mix(in srgb, var(--unavail) 55%, #10131c) 3px 7px
+  );
+}
 .occ__seg.dock {
   background: transparent;
+}
+.occ__div {
+  width: 2px;
+  flex: none;
+  background: var(--bg);
 }
 .occ__legend {
   display: flex;
@@ -264,6 +281,26 @@ body {
   display: inline-block;
   margin-right: 6px;
   vertical-align: middle;
+}
+.occ__legend i.sw-free {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+}
+.occ__legend i.sw-unavail {
+  background: var(--unavail);
+}
+.occ__legend i.sw-broken {
+  background: var(--broken);
+}
+.occ__group {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+.occ__group:not(:first-child) {
+  margin-left: 4px;
 }
 
 /* charts */

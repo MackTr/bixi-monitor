@@ -77,26 +77,36 @@ function renderHero(n: any) {
   const ebikes = n.ebikes as number;
   const trailer = (n.trailer as number) ?? 0;
   const docks = n.docksAvailable as number;
+  const unavail = (n.docksDisabled as number) ?? 0; // docks out of service
+  const broken = (n.bikesDisabled as number) ?? 0; // bikes out of service
   const pct = (v: number) => `${(Math.max(0, v) / cap) * 100}%`;
   const st = n.status as string;
 
+  // Bar spans all capacity slots: usable bikes + broken bikes + unavailable docks
+  // are explicit segments; the remaining track is free (returnable) docks.
   $("hero").innerHTML = `
     <div class="hero__top">
       <div class="bignum"><b>${n.bikes}</b><span>bike${n.bikes === 1 ? "" : "s"} of ${cap}</span></div>
       <span class="pill pill--${st}"><i></i>${STATUS_LABEL[st] ?? st}</span>
     </div>
     <div class="occ">
-      <div class="occ__bar" role="img" aria-label="${mech} mechanical, ${ebikes} ebikes, ${trailer} trailer, ${docks} free docks">
+      <div class="occ__bar" role="img" aria-label="${mech} mechanical, ${ebikes} ebikes, ${trailer} trailer, ${docks} free docks, ${unavail} unavailable docks, ${broken} out-of-service bikes">
         <div class="occ__seg mech" style="width:${pct(mech)}"></div>
         <div class="occ__seg ebike" style="width:${pct(ebikes)}"></div>
         <div class="occ__seg trailer" style="width:${pct(trailer)}"></div>
+        <div class="occ__seg broken" style="width:${pct(broken)}"></div>
+        <div class="occ__div" role="separator" aria-label="bikes to the left, docks to the right"></div>
+        <div class="occ__seg unavail" style="width:${pct(unavail)}"></div>
       </div>
       <div class="occ__legend">
+        <span class="occ__group">bikes</span>
         <span><i style="background:var(--bike)"></i><b>${mech}</b> mechanical</span>
         <span><i style="background:var(--ebike)"></i><b>${ebikes}</b> ebike${ebikes === 1 ? "" : "s"}</span>
         <span><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"}</span>
-        <span><i style="background:var(--card-2);border:1px solid var(--border)"></i><b>${docks}</b> free docks</span>
-        ${n.bikesDisabled ? `<span class="muted">${n.bikesDisabled} disabled</span>` : ""}
+        ${broken ? `<span><i class="sw-broken"></i><b>${broken}</b> broken bike${broken === 1 ? "" : "s"}</span>` : ""}
+        <span class="occ__group">docks</span>
+        <span><i class="sw-free"></i><b>${docks}</b> free dock${docks === 1 ? "" : "s"}</span>
+        ${unavail ? `<span><i class="sw-unavail"></i><b>${unavail}</b> unavailable dock${unavail === 1 ? "" : "s"}</span>` : ""}
       </div>
     </div>`;
 
