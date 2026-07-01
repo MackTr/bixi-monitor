@@ -75,6 +75,7 @@ function renderHero(n: any) {
   const cap = n.station.capacity as number;
   const mech = n.mechanical as number;
   const ebikes = n.ebikes as number;
+  const trailer = (n.trailer as number) ?? 0;
   const docks = n.docksAvailable as number;
   const pct = (v: number) => `${(Math.max(0, v) / cap) * 100}%`;
   const st = n.status as string;
@@ -85,13 +86,15 @@ function renderHero(n: any) {
       <span class="pill pill--${st}"><i></i>${STATUS_LABEL[st] ?? st}</span>
     </div>
     <div class="occ">
-      <div class="occ__bar" role="img" aria-label="${mech} mechanical, ${ebikes} ebikes, ${docks} free docks">
+      <div class="occ__bar" role="img" aria-label="${mech} mechanical, ${ebikes} ebikes, ${trailer} trailer, ${docks} free docks">
         <div class="occ__seg mech" style="width:${pct(mech)}"></div>
         <div class="occ__seg ebike" style="width:${pct(ebikes)}"></div>
+        <div class="occ__seg trailer" style="width:${pct(trailer)}"></div>
       </div>
       <div class="occ__legend">
         <span><i style="background:var(--bike)"></i><b>${mech}</b> mechanical</span>
         <span><i style="background:var(--ebike)"></i><b>${ebikes}</b> ebike${ebikes === 1 ? "" : "s"}</span>
+        <span><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"}</span>
         <span><i style="background:var(--card-2);border:1px solid var(--border)"></i><b>${docks}</b> free docks</span>
         ${n.bikesDisabled ? `<span class="muted">${n.bikesDisabled} disabled</span>` : ""}
       </div>

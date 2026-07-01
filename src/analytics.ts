@@ -5,6 +5,7 @@ export interface ObsRow {
   ts: number;
   bikes: number;
   ebikes: number;
+  cargo?: number | null;
   docks: number;
   is_renting?: number | null;
   is_returning?: number | null;

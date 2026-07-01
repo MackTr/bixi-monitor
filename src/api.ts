@@ -68,7 +68,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
 // ---------- row loading ----------
 
-const ROW_COLS = "ts, bikes, ebikes, docks, is_renting, is_returning, is_installed";
+const ROW_COLS = "ts, bikes, ebikes, cargo, docks, is_renting, is_returning, is_installed";
 
 // Rows in [from, to] plus the one immediately before `from` (clamped to `from`)
 // so the step function has a correct value at the window's left edge.
@@ -92,7 +92,7 @@ async function loadRows(env: Env, stationId: string, from: number, to: number): 
 
 async function now(env: Env, station: Station): Promise<Response> {
   const row = await env.DB.prepare(
-    `SELECT ts, last_reported, bikes, ebikes, docks, bikes_disabled, docks_disabled,
+    `SELECT ts, last_reported, bikes, ebikes, cargo, docks, bikes_disabled, docks_disabled,
             is_renting, is_returning, is_installed
        FROM observations WHERE station_id = ? ORDER BY ts DESC LIMIT 1`,
   )
@@ -106,6 +106,7 @@ async function now(env: Env, station: Station): Promise<Response> {
   const bikes = row.bikes as number;
   const docks = row.docks as number;
   const ebikes = row.ebikes as number;
+  const trailer = (row.cargo as number) ?? 0; // DB column `cargo` (GBFS cargo_bicycle), surfaced as "trailer"
   const age = Math.floor(Date.now() / 1000) - ts;
   return json(
     {
@@ -116,7 +117,8 @@ async function now(env: Env, station: Station): Promise<Response> {
       status: deriveStatus(bikes, docks),
       bikes,
       ebikes,
-      mechanical: bikes - ebikes,
+      trailer,
+      mechanical: bikes - ebikes - trailer,
       docksAvailable: docks,
       bikesDisabled: row.bikes_disabled,
       docksDisabled: row.docks_disabled,
@@ -147,7 +149,8 @@ async function observations(env: Env, station: Station, url: URL): Promise<Respo
     ts: r.ts,
     bikes: r.bikes,
     ebikes: r.ebikes,
-    mechanical: r.bikes - r.ebikes,
+    trailer: r.cargo ?? 0,
+    mechanical: r.bikes - r.ebikes - (r.cargo ?? 0),
     docks: r.docks,
     status: deriveStatus(r.bikes, r.docks),
   }));

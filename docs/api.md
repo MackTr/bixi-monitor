@@ -22,12 +22,12 @@ Collector liveness. `ok` is false if the last write is older than 10 minutes.
 
 ### `GET /stations/{id}/now`
 Latest observation + derived status. `status` ∈ `empty | low | full | ok` (empty = 0 bikes,
-full = 0 docks, low = ≤2 bikes). `mechanical = bikes − ebikes`. `Cache-Control: max-age=15`.
+full = 0 docks, low = ≤2 bikes). `mechanical = bikes − ebikes − trailer`. `Cache-Control: max-age=15`.
 ```json
 { "station": { "id": "345", "name": "Regina / de Verdun", "capacity": 19 },
   "observedAt": "2026-06-26T15:01:00Z", "ageSeconds": 30, "stale": false,
-  "status": "empty", "bikes": 0, "ebikes": 0, "mechanical": 0,
-  "docksAvailable": 18, "bikesDisabled": 1, "isRenting": true, "isReturning": true, "isInstalled": true }
+  "status": "ok", "bikes": 18, "ebikes": 1, "trailer": 1, "mechanical": 16,
+  "docksAvailable": 0, "bikesDisabled": 1, "isRenting": true, "isReturning": true, "isInstalled": true }
 ```
 
 ### `GET /stations/{id}/observations?from&to&limit`
@@ -36,7 +36,7 @@ Raw series for charts. `from`/`to` accept ISO-8601 or epoch (s or ms); default =
 ```json
 { "station": "345", "capacity": 19, "from": "...", "to": "...", "count": 120,
   "observations": [ { "t": "2026-06-26T14:00:00Z", "ts": 1782484800, "bikes": 3,
-    "ebikes": 1, "mechanical": 2, "docks": 16, "status": "ok" } ] }
+    "ebikes": 1, "trailer": 0, "mechanical": 2, "docks": 16, "status": "ok" } ] }
 ```
 
 ### `GET /stations/{id}/episodes?type&days`
@@ -64,6 +64,9 @@ for each weekday, as minutes-since-midnight + `"HH:MM"`, with the day count (`nu
 ```
 
 ## Notes
-- `num_bikes_available` from GBFS **includes** ebikes; mechanical is derived.
+- Data comes from the GBFS **2-2** feed, which exposes `vehicle_types` + a per-station
+  `vehicle_types_available` breakdown. `num_bikes_available` **includes** ebikes and trailer bikes,
+  so **`mechanical = bikes − ebikes − trailer`**. `trailer` = bikes with `form_factor: cargo_bicycle`
+  (GBFS's term; `vehicle_type_id 14`), which the legacy feed silently folded into the plain count.
 - Observations are stored **on change** (+ a ≥15-min heartbeat), so charts should **step-hold** the
   last value forward — that's the true station behaviour, not interpolation.

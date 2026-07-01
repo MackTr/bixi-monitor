@@ -19,6 +19,7 @@
   --ok: #34d399;
   --bike: #5bd1c0; /* mechanical fill */
   --ebike: #8b8bff; /* ebike fill */
+  --trailer: #fb923c; /* trailer (GBFS cargo_bicycle) fill */
   --accent: #ff5a5f; /* BIXI coral */
 
   --r: 16px;
@@ -237,6 +238,9 @@ body {
 }
 .occ__seg.ebike {
   background: var(--ebike);
+}
+.occ__seg.trailer {
+  background: var(--trailer);
 }
 .occ__seg.dock {
   background: transparent;
