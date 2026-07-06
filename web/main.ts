@@ -104,15 +104,15 @@ function renderHero(n: any) {
           <div class="occ__items">
             <span><i style="background:var(--bike)"></i><b>${mech}</b> mechanical</span>
             <span><i style="background:var(--ebike)"></i><b>${ebikes}</b> ebike${ebikes === 1 ? "" : "s"}</span>
-            <span class="occ__aside"><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"} <em>· not counted</em></span>
-            ${broken ? `<span class="occ__aside"><i class="sw-broken"></i><b>${broken}</b> broken bike${broken === 1 ? "" : "s"}</span>` : ""}
+            <span><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"}</span>
+            ${broken ? `<span><i class="sw-broken"></i><b>${broken}</b> broken bike${broken === 1 ? "" : "s"}</span>` : ""}
           </div>
         </div>
         <div class="occ__row">
           <span class="occ__group">docks</span>
           <div class="occ__items">
             <span><i class="sw-free"></i><b>${docks}</b> free dock${docks === 1 ? "" : "s"}</span>
-            ${unavail ? `<span class="occ__aside"><i class="sw-unavail"></i><b>${unavail}</b> unavailable dock${unavail === 1 ? "" : "s"}</span>` : ""}
+            ${unavail ? `<span><i class="sw-unavail"></i><b>${unavail}</b> unavailable dock${unavail === 1 ? "" : "s"}</span>` : ""}
           </div>
         </div>
       </div>

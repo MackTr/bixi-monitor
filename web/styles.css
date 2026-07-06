@@ -281,20 +281,9 @@ body {
   align-items: center;
   gap: 8px 16px;
 }
-.occ__aside {
-  color: var(--ink-faint);
-}
-.occ__aside em {
-  font-style: normal;
-  font-size: 11px;
-  opacity: 0.85;
-}
 .occ__legend b {
   color: var(--ink);
   font-weight: 600;
-}
-.occ__aside b {
-  color: var(--ink-dim);
 }
 .occ__legend i {
   width: 9px;
