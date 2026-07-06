@@ -99,14 +99,22 @@ function renderHero(n: any) {
         <div class="occ__seg unavail" style="width:${pct(unavail)}"></div>
       </div>
       <div class="occ__legend">
-        <span class="occ__group">bikes</span>
-        <span><i style="background:var(--bike)"></i><b>${mech}</b> mechanical</span>
-        <span><i style="background:var(--ebike)"></i><b>${ebikes}</b> ebike${ebikes === 1 ? "" : "s"}</span>
-        <span><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"}</span>
-        ${broken ? `<span><i class="sw-broken"></i><b>${broken}</b> broken bike${broken === 1 ? "" : "s"}</span>` : ""}
-        <span class="occ__group">docks</span>
-        <span><i class="sw-free"></i><b>${docks}</b> free dock${docks === 1 ? "" : "s"}</span>
-        ${unavail ? `<span><i class="sw-unavail"></i><b>${unavail}</b> unavailable dock${unavail === 1 ? "" : "s"}</span>` : ""}
+        <div class="occ__row">
+          <span class="occ__group">bikes</span>
+          <div class="occ__items">
+            <span><i style="background:var(--bike)"></i><b>${mech}</b> mechanical</span>
+            <span><i style="background:var(--ebike)"></i><b>${ebikes}</b> ebike${ebikes === 1 ? "" : "s"}</span>
+            <span class="occ__aside"><i style="background:var(--trailer)"></i><b>${trailer}</b> trailer${trailer === 1 ? "" : "s"} <em>· not counted</em></span>
+            ${broken ? `<span class="occ__aside"><i class="sw-broken"></i><b>${broken}</b> broken bike${broken === 1 ? "" : "s"}</span>` : ""}
+          </div>
+        </div>
+        <div class="occ__row">
+          <span class="occ__group">docks</span>
+          <div class="occ__items">
+            <span><i class="sw-free"></i><b>${docks}</b> free dock${docks === 1 ? "" : "s"}</span>
+            ${unavail ? `<span class="occ__aside"><i class="sw-unavail"></i><b>${unavail}</b> unavailable dock${unavail === 1 ? "" : "s"}</span>` : ""}
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -415,6 +423,18 @@ $("heatWindow").addEventListener("click", (e) => {
     .querySelectorAll("button")
     .forEach((x) => x.classList.toggle("is-active", x === b));
   renderHeatmap();
+});
+
+// Touch devices have no hover — let a tap on a heatmap row reveal that day's
+// run-out time (desktop keeps the hover reveal via CSS). One row open at a time.
+$("heatmap").addEventListener("click", (e) => {
+  const row = (e.target as Element).closest(".hrow");
+  if (!row) return;
+  const wasOpen = row.classList.contains("is-open");
+  $("heatmap")
+    .querySelectorAll(".hrow.is-open")
+    .forEach((r) => r.classList.remove("is-open"));
+  if (!wasOpen) row.classList.add("is-open");
 });
 
 $("todayToggle").addEventListener("click", (e) => {

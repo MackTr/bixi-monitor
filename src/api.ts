@@ -70,6 +70,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
 const ROW_COLS = "ts, bikes, ebikes, cargo, docks, is_renting, is_returning, is_installed";
 
+// Available bikes exclude cargo/trailer bikes: they occupy a dock but aren't a
+// bike you can grab and ride, so usable = num_bikes_available − cargo. Applied at
+// load time so every analytic (episodes, heatmap, run-out, morning stats) counts
+// only usable bikes — which also retro-corrects history, since each stored row
+// kept its cargo count in a separate column.
+const usable = (r: ObsRow): ObsRow => ({ ...r, bikes: r.bikes - (r.cargo ?? 0) });
+
 // Rows in [from, to] plus the one immediately before `from` (clamped to `from`)
 // so the step function has a correct value at the window's left edge.
 async function loadRows(env: Env, stationId: string, from: number, to: number): Promise<ObsRow[]> {
@@ -83,8 +90,8 @@ async function loadRows(env: Env, stationId: string, from: number, to: number): 
   )
     .bind(stationId, from, to)
     .all<ObsRow>();
-  const rows = within.results ?? [];
-  if (prior) rows.unshift({ ...prior, ts: from });
+  const rows = (within.results ?? []).map(usable);
+  if (prior) rows.unshift({ ...usable(prior), ts: from });
   return rows;
 }
 
@@ -103,10 +110,10 @@ async function now(env: Env, station: Station): Promise<Response> {
     return json({ station: publicStation(station), observation: null, note: "no data yet — collecting" });
   }
   const ts = row.ts as number;
-  const bikes = row.bikes as number;
   const docks = row.docks as number;
   const ebikes = row.ebikes as number;
   const trailer = (row.cargo as number) ?? 0; // DB column `cargo` (GBFS cargo_bicycle), surfaced as "trailer"
+  const bikes = (row.bikes as number) - trailer; // usable = mechanical + ebikes (cargo excluded)
   const age = Math.floor(Date.now() / 1000) - ts;
   return json(
     {
@@ -118,7 +125,7 @@ async function now(env: Env, station: Station): Promise<Response> {
       bikes,
       ebikes,
       trailer,
-      mechanical: bikes - ebikes - trailer,
+      mechanical: bikes - ebikes,
       docksAvailable: docks,
       bikesDisabled: row.bikes_disabled,
       docksDisabled: row.docks_disabled,
@@ -144,16 +151,20 @@ async function observations(env: Env, station: Station, url: URL): Promise<Respo
     .bind(station.id, from, to, limit)
     .all<ObsRow>();
 
-  const data = (res.results ?? []).map((r) => ({
-    t: iso(r.ts),
-    ts: r.ts,
-    bikes: r.bikes,
-    ebikes: r.ebikes,
-    trailer: r.cargo ?? 0,
-    mechanical: r.bikes - r.ebikes - (r.cargo ?? 0),
-    docks: r.docks,
-    status: deriveStatus(r.bikes, r.docks),
-  }));
+  const data = (res.results ?? []).map((r) => {
+    const trailer = r.cargo ?? 0;
+    const bikes = r.bikes - trailer; // usable = mechanical + ebikes (cargo excluded)
+    return {
+      t: iso(r.ts),
+      ts: r.ts,
+      bikes,
+      ebikes: r.ebikes,
+      trailer,
+      mechanical: bikes - r.ebikes,
+      docks: r.docks,
+      status: deriveStatus(bikes, r.docks),
+    };
+  });
   return json({
     station: station.id,
     capacity: station.capacity,

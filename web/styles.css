@@ -263,16 +263,38 @@ body {
   background: var(--bg);
 }
 .occ__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-top: 12px;
+  display: grid;
+  row-gap: 10px;
+  margin-top: 14px;
   font-size: 13px;
   color: var(--ink-dim);
+}
+.occ__row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: baseline;
+  column-gap: 10px;
+}
+.occ__items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.occ__aside {
+  color: var(--ink-faint);
+}
+.occ__aside em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.85;
 }
 .occ__legend b {
   color: var(--ink);
   font-weight: 600;
+}
+.occ__aside b {
+  color: var(--ink-dim);
 }
 .occ__legend i {
   width: 9px;
@@ -293,14 +315,12 @@ body {
   background: var(--broken);
 }
 .occ__group {
+  min-width: 44px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 600;
   color: var(--ink-faint);
-}
-.occ__group:not(:first-child) {
-  margin-left: 4px;
 }
 
 /* charts */
@@ -310,7 +330,10 @@ body {
   display: block;
 }
 
-/* heatmap per-day hover: reveal that day's run-out time */
+/* heatmap per-day reveal: hover on desktop, tap (.is-open) on touch */
+.hrow {
+  cursor: pointer;
+}
 .hrow__bg {
   fill: transparent;
 }
@@ -322,10 +345,12 @@ body {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.hrow:hover .hrow__ro {
+.hrow:hover .hrow__ro,
+.hrow.is-open .hrow__ro {
   opacity: 1;
 }
-.hrow:hover .hrow__dot {
+.hrow:hover .hrow__dot,
+.hrow.is-open .hrow__dot {
   opacity: 0;
 }
 .legend {
@@ -471,6 +496,31 @@ body {
   text-align: center;
   font-size: 12px;
   padding: 4px 0 8px;
+}
+
+/* mobile: comfier controls + tighter spacing (targeted, no re-layout) */
+@media (max-width: 600px) {
+  .card__head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .head-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .toggle {
+    flex-wrap: wrap;
+  }
+  .toggle button {
+    padding: 7px 14px;
+    font-size: 12.5px;
+  }
+  .occ {
+    margin-top: 16px;
+  }
+  .occ__row {
+    grid-template-columns: 46px 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
