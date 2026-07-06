@@ -139,10 +139,21 @@ export interface StatsOptions {
   windowStartHour: number; // e.g. 6
   windowEndHour: number; // e.g. 11
   targetTime: string; // "HH:MM"
+  holidayName?: (dateStr: string) => string | null; // local YYYY-MM-DD -> holiday name
 }
 
 export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   const intervals = toIntervals(rows, opt.now);
+
+  // Holidays aren't typical weekdays: any date the checker names is left out of
+  // every aggregate below, and reported so clients can mark the exclusion. Only
+  // dates that actually carry data end up in `excluded`.
+  const excluded = new Map<string, string>();
+  const isHoliday = (ds: string): boolean => {
+    const name = opt.holidayName?.(ds);
+    if (name) excluded.set(ds, name);
+    return !!name;
+  };
 
   // Heatmap: duration-weighted, split at local-hour boundaries.
   const dur = grid(0) as number[][];
@@ -156,7 +167,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       const nextHour = hourStart + 3600;
       const segEnd = Math.min(iv.t1, nextHour > t ? nextHour : t + 3600);
       const d = segEnd - t;
-      if (d > 0 && p.weekday >= 0) {
+      if (d > 0 && p.weekday >= 0 && !isHoliday(p.dateStr)) {
         dur[p.weekday][p.hour] += d;
         bikeW[p.weekday][p.hour] += iv.bikes * d;
         if (iv.bikes <= 0) emptyW[p.weekday][p.hour] += d;
@@ -203,7 +214,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   for (const ds of dates) {
     const [y, m, d] = ds.split("-").map(Number);
     const dow = localParts(wallToEpoch(y, m, d, 12, 0, opt.tz), opt.tz).weekday;
-    if (dow === 0 || dow === 6) continue; // weekdays only
+    if (dow === 0 || dow === 6 || isHoliday(ds)) continue; // weekdays only, holidays out
 
     const wStart = wallToEpoch(y, m, d, opt.windowStartHour, 0, opt.tz);
     const wEnd = wallToEpoch(y, m, d, opt.windowEndHour, 0, opt.tz);
@@ -247,7 +258,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   for (const iv of intervals) {
     if (prevBikes != null && prevBikes > 0 && iv.bikes <= 0) {
       const ds = localParts(iv.t0, opt.tz).dateStr;
-      if (!firstRunout.has(ds)) firstRunout.set(ds, iv.t0);
+      if (!firstRunout.has(ds) && !isHoliday(ds)) firstRunout.set(ds, iv.t0);
     }
     prevBikes = iv.bikes;
   }
@@ -284,6 +295,9 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       runoutByDow, // [dow 0=Sun..6=Sat] { minutes, time, days } — avg time bikes hit 0
       runoutAvg, // weekday-wide average run-out time { minutes, time, days }
     },
+    excludedHolidays: [...excluded]
+      .map(([date, name]) => ({ date, name }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1)),
     longestEmptyMinutes: Math.round(longest / 60),
   };
 }

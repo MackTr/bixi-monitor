@@ -1,6 +1,7 @@
 import type { Env } from "./worker";
 import { STATIONS, publicStation, type Station } from "./stations";
 import { computeEpisodes, computeStats, deriveStatus, type ObsRow } from "./analytics";
+import { holidayName } from "./holidays";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -206,6 +207,7 @@ async function stats(env: Env, station: Station, url: URL): Promise<Response> {
     windowStartHour: 6,
     windowEndHour: 11,
     targetTime: "08:30",
+    holidayName,
   });
   return json({ station: station.id, days, tz, capacity: station.capacity, ...out });
 }

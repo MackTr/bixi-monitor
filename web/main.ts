@@ -28,6 +28,17 @@ function durLabel(mins: number): string {
 }
 const STATUS_LABEL: Record<string, string> = { empty: "Empty", low: "Low", full: "Full", ok: "Available" };
 
+// ---------- holidays ----------
+// The QC calendar lives server-side; the stats payload lists the holiday dates it
+// excluded from weekday aggregates, and the markers below just surface those.
+const dateKey = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TZ }); // YYYY-MM-DD
+const holidayOn = (key: string): string | null =>
+  ((lastStats?.excludedHolidays ?? []) as { date: string; name: string }[]).find((h) => h.date === key)?.name ?? null;
+function shortDate(ds: string): string {
+  const [y, m, d] = ds.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 // ---------- colormaps ----------
 type Stops = [number, number, number][];
 function lerpStops(stops: Stops, t: number): string {
@@ -161,9 +172,11 @@ function renderToday() {
   const focusBtn = document.querySelector('#todayToggle button[data-view="focus"]') as HTMLButtonElement | null;
   if (focusBtn) focusBtn.disabled = !scarce;
   $("todayTitle").textContent = focusing ? "When bikes run out" : "Last 24 hours";
-  $("todayRange").textContent = focusing
-    ? `${clockLabel(new Date(winFrom * 1000).toISOString())}–${clockLabel(new Date(winTo * 1000).toISOString())}`
-    : "last 24 h";
+  const todayHol = holidayOn(dateKey(new Date())); // holidays skew the usual pattern — say so
+  $("todayRange").textContent =
+    (focusing
+      ? `${clockLabel(new Date(winFrom * 1000).toISOString())}–${clockLabel(new Date(winTo * 1000).toISOString())}`
+      : "last 24 h") + (todayHol ? ` · ${todayHol}` : "");
 
   const W = 720, H = 220, padL = 28, padR = 12, padT = 14, padB = 22;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -324,6 +337,10 @@ function renderHeatmap() {
   let stops = "";
   for (let i = 0; i <= 10; i++) stops += `<stop offset="${i * 10}%" stop-color="${isEmpty ? emptyColor(i / 10) : magma(i / 10)}"/>`;
   const ly = top + rowsH + 28;
+  const hols = (lastStats.excludedHolidays ?? []) as { date: string; name: string }[];
+  const holNote = hols.length
+    ? `<text x="${gutter + 80}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">holidays excluded · ${hols.map((h) => shortDate(h.date)).join(", ")}<title>${hols.map((h) => `${shortDate(h.date)} — ${h.name}`).join("\n")}</title></text>`
+    : "";
   const legend = `
     <defs>
       <linearGradient id="heatGrad" x1="0" x2="1">${stops}</linearGradient>
@@ -333,6 +350,7 @@ function renderHeatmap() {
     </defs>
     <rect x="${gutter}" y="${ly}" width="13" height="9" rx="2" fill="url(#nodata)"/>
     <text x="${gutter + 19}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">no data</text>
+    ${holNote}
     <text x="${W - 192}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)" text-anchor="end">${isEmpty ? "always has bikes" : "0"}</text>
     <rect x="${W - 188}" y="${ly}" width="118" height="9" rx="2" fill="url(#heatGrad)"/>
     <text x="${W - 66}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">${isEmpty ? "always empty" : cap}</text>`;
@@ -372,10 +390,11 @@ function renderEpisodes(empty: any, full: any) {
   $("episodes").innerHTML = list
     .map((e) => {
       const day = new Date(e.start).toLocaleDateString("en-CA", { timeZone: TZ, month: "short", day: "numeric" });
+      const hol = holidayOn(dateKey(new Date(e.start)));
       const range = e.ongoing
         ? `${clockLabel(e.start)} → <span class="ongoing">now</span>`
         : `${clockLabel(e.start)}–${clockLabel(e.end)}`;
-      return `<div class="ep"><i class="${e.type}"></i><span class="when">${e.type === "empty" ? "Empty" : "Full"} · ${day} ${range}</span><span class="dur">${durLabel(e.minutes)}</span></div>`;
+      return `<div class="ep"><i class="${e.type}"></i><span class="when">${e.type === "empty" ? "Empty" : "Full"} · ${day} ${range}${hol ? ` <span class="hol" title="${hol}">· holiday</span>` : ""}</span><span class="dur">${durLabel(e.minutes)}</span></div>`;
     })
     .join("");
 }
@@ -396,10 +415,11 @@ async function refreshAll() {
     api("episodes?type=empty&days=30"),
     api("episodes?type=full&days=30"),
   ]);
-  renderHero(n);
+  // assign both before rendering: today + episodes read lastStats for holiday tags
   lastToday = today;
-  renderToday();
   lastStats = stats;
+  renderHero(n);
+  renderToday();
   renderHeatmap();
   renderStats();
   renderEpisodes(epEmpty, epFull);

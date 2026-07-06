@@ -473,6 +473,10 @@ body {
   color: var(--empty);
   font-weight: 600;
 }
+.ep .hol {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
 
 .empty-note {
   color: var(--ink-faint);
