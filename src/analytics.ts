@@ -36,18 +36,31 @@ interface LocalParts {
   dateStr: string; // YYYY-MM-DD (local)
 }
 
+// Constructing an Intl.DateTimeFormat costs orders of magnitude more than using
+// one — doing it per localParts call blew the Workers CPU budget (1102 errors on
+// /stats), so formatters are cached per timezone.
+const FMT_CACHE = new Map<string, Intl.DateTimeFormat>();
+function formatterFor(tz: string): Intl.DateTimeFormat {
+  let f = FMT_CACHE.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      hour12: false,
+      weekday: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    FMT_CACHE.set(tz, f);
+  }
+  return f;
+}
+
 export function localParts(epoch: number, tz: string): LocalParts {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    hour12: false,
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const fmt = formatterFor(tz);
   const p: Record<string, string> = {};
   for (const part of fmt.formatToParts(new Date(epoch * 1000))) p[part.type] = part.value;
   const hour = parseInt(p.hour, 10) % 24; // some platforms emit "24" at midnight
@@ -81,6 +94,24 @@ export function wallToEpoch(
     guess += want - shown;
   }
   return guess;
+}
+
+// Local weekday/hour/date are constant within a quarter-hour (every real UTC
+// offset is a multiple of 15 min), so wall-clock boundaries are plain epoch
+// arithmetic and the Intl lookup memoizes per bucket. The memo is module-level
+// because bucket facts are immutable: a warm isolate serves repeated dashboard
+// polls with near-zero Intl work. Cleared if it ever balloons (multi-tz abuse).
+const BUCKET_PARTS = new Map<string, LocalParts>();
+function bucketParts(epoch: number, tz: string): LocalParts {
+  const k = Math.floor(epoch / 900);
+  const key = `${tz}:${k}`;
+  let p = BUCKET_PARTS.get(key);
+  if (!p) {
+    if (BUCKET_PARTS.size > 50_000) BUCKET_PARTS.clear();
+    p = localParts(k * 900, tz);
+    BUCKET_PARTS.set(key, p);
+  }
+  return p;
 }
 
 // ---------- episodes ----------
@@ -155,6 +186,8 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
     return !!name;
   };
 
+  const partsAt = (t: number): LocalParts => bucketParts(t, opt.tz);
+
   // Heatmap: duration-weighted, split at local-hour boundaries.
   const dur = grid(0) as number[][];
   const bikeW = grid(0) as number[][];
@@ -162,10 +195,8 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   for (const iv of intervals) {
     let t = iv.t0;
     while (t < iv.t1) {
-      const p = localParts(t, opt.tz);
-      const hourStart = wallToEpoch(p.year, p.month, p.day, p.hour, 0, opt.tz);
-      const nextHour = hourStart + 3600;
-      const segEnd = Math.min(iv.t1, nextHour > t ? nextHour : t + 3600);
+      const p = partsAt(t);
+      const segEnd = Math.min(iv.t1, (Math.floor(t / 900) + 1) * 900);
       const d = segEnd - t;
       if (d > 0 && p.weekday >= 0 && !isHoliday(p.dateStr)) {
         dur[p.weekday][p.hour] += d;
@@ -208,8 +239,8 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
 
   const dates = new Set<string>();
   for (const iv of intervals) {
-    dates.add(localParts(iv.t0, opt.tz).dateStr);
-    dates.add(localParts(iv.t1 - 1, opt.tz).dateStr);
+    dates.add(partsAt(iv.t0).dateStr);
+    dates.add(partsAt(iv.t1 - 1).dateStr);
   }
   for (const ds of dates) {
     const [y, m, d] = ds.split("-").map(Number);
@@ -257,7 +288,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   let prevBikes: number | null = null;
   for (const iv of intervals) {
     if (prevBikes != null && prevBikes > 0 && iv.bikes <= 0) {
-      const ds = localParts(iv.t0, opt.tz).dateStr;
+      const ds = partsAt(iv.t0).dateStr;
       if (!firstRunout.has(ds) && !isHoliday(ds)) firstRunout.set(ds, iv.t0);
     }
     prevBikes = iv.bikes;
