@@ -51,7 +51,8 @@ function lerpStops(stops: Stops, t: number): string {
   const c = (k: number) => Math.round(a[k] + (b[k] - a[k]) * f);
   return `rgb(${c(0)},${c(1)},${c(2)})`;
 }
-// magma — perceptually uniform, colorblind/grayscale safe. Used for "avg bikes".
+// magma — perceptually uniform, colorblind/grayscale safe. Used for "avg bikes"
+// (Mack tried the red scarcity ramp there and found it confusing — keep magma).
 const MAGMA: Stops = [
   [0, 0, 4],
   [28, 16, 68],
@@ -152,13 +153,13 @@ function renderToday() {
   const dataTo = Math.floor(Date.now() / 1000);
   const ivAll = obs.map((o, i) => ({ t0: o.ts, t1: i + 1 < obs.length ? obs[i + 1].ts : dataTo, bikes: o.bikes, docks: o.docks }));
 
-  // the "scarce" span = where bikes ran out (fall back to low ≤2 if never empty)
+  // the "scarce" span = where bikes ran out (fall back to low ≤3 if never empty)
   const spanOf = (pred: (s: any) => boolean): [number, number] | null => {
     let lo = Infinity, hi = -Infinity;
     for (const s of ivAll) if (pred(s)) { lo = Math.min(lo, s.t0); hi = Math.max(hi, s.t1); }
     return hi > lo ? [lo, hi] : null;
   };
-  const scarce = spanOf((s) => s.bikes <= 0) ?? spanOf((s) => s.bikes <= 2);
+  const scarce = spanOf((s) => s.bikes <= 0) ?? spanOf((s) => s.bikes <= 3);
   const focusing = todayView === "focus" && !!scarce;
 
   let winFrom = dataFrom, winTo = dataTo;
@@ -242,7 +243,7 @@ function renderHeatmap() {
 
   const W = 720, gutter = 34, top = 24, cellH = 24;
   const rowsH = order.length * cellH;
-  const H = top + rowsH + 46;
+  const H = top + rowsH + 58;
 
   // run-out hour window: zoom to the hours the station is ever empty (focus), else full day
   const pe = lastStats.heatmap.pctEmpty as (number | null)[][];
@@ -341,6 +342,17 @@ function renderHeatmap() {
   const holNote = hols.length
     ? `<text x="${gutter + 80}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">holidays excluded · ${hols.map((h) => shortDate(h.date)).join(", ")}<title>${hols.map((h) => `${shortDate(h.date)} — ${h.name}`).join("\n")}</title></text>`
     : "";
+
+  // numeric scale under the gradient: % for the empty view, bike counts for avg
+  const barX = W - 232, barW = 160;
+  const tickVals = isEmpty ? [0, 0.5, 1] : [0, 5, 10, 15, cap];
+  let tickMarks = "";
+  for (const v of tickVals) {
+    const tx = barX + (isEmpty ? v : v / cap) * barW;
+    tickMarks +=
+      `<line x1="${tx.toFixed(1)}" y1="${ly + 9}" x2="${tx.toFixed(1)}" y2="${ly + 12}" stroke="var(--ink-faint)"/>` +
+      `<text x="${tx.toFixed(1)}" y="${ly + 21}" font-size="9" fill="var(--ink-faint)" text-anchor="middle">${isEmpty ? `${Math.round(v * 100)}%` : v}</text>`;
+  }
   const legend = `
     <defs>
       <linearGradient id="heatGrad" x1="0" x2="1">${stops}</linearGradient>
@@ -351,9 +363,10 @@ function renderHeatmap() {
     <rect x="${gutter}" y="${ly}" width="13" height="9" rx="2" fill="url(#nodata)"/>
     <text x="${gutter + 19}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">no data</text>
     ${holNote}
-    <text x="${W - 192}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)" text-anchor="end">${isEmpty ? "always has bikes" : "0"}</text>
-    <rect x="${W - 188}" y="${ly}" width="118" height="9" rx="2" fill="url(#heatGrad)"/>
-    <text x="${W - 66}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">${isEmpty ? "always empty" : cap}</text>`;
+    ${isEmpty ? `<text x="${barX - 6}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)" text-anchor="end">always has bikes</text>` : ""}
+    <rect x="${barX}" y="${ly}" width="${barW}" height="9" rx="2" fill="url(#heatGrad)"/>
+    ${isEmpty ? `<text x="${barX + barW + 6}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">always empty</text>` : ""}
+    ${tickMarks}`;
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${isEmpty ? "share of time with no bikes" : "average bikes available"} by hour and weekday, with a dotted line at the weekday-average bike run-out time">${cells}${avgLine}${hours}${legend}</svg>`;
 }

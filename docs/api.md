@@ -22,7 +22,7 @@ Collector liveness. `ok` is false if the last write is older than 10 minutes.
 
 ### `GET /stations/{id}/now`
 Latest observation + derived status. `status` ∈ `empty | low | full | ok` (empty = 0 bikes,
-full = 0 docks, low = ≤2 bikes). `mechanical = bikes − ebikes − trailer`. `Cache-Control: max-age=15`.
+full = 0 docks, low = ≤3 bikes). `mechanical = bikes − ebikes − trailer`. `Cache-Control: max-age=15`.
 ```json
 { "station": { "id": "345", "name": "Regina / de Verdun", "capacity": 19 },
   "observedAt": "2026-06-26T15:01:00Z", "ageSeconds": 30, "stale": false,

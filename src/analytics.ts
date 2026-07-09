@@ -17,7 +17,7 @@ export type Status = "empty" | "low" | "full" | "ok";
 export function deriveStatus(bikes: number, docks: number): Status {
   if (bikes <= 0) return "empty";
   if (docks <= 0) return "full";
-  if (bikes <= 2) return "low";
+  if (bikes <= 3) return "low";
   return "ok";
 }
 
