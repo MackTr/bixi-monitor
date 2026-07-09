@@ -286,13 +286,21 @@ function renderHeatmap() {
     let cellRects = "";
     for (let h = startH; h <= endH; h++) {
       const v = grid[dow][h];
-      cellRects += `<rect x="${colX(h).toFixed(1)}" y="${ry}" width="${cellW.toFixed(1)}" height="${cellH - 2}" rx="2" fill="${color(v)}"><title>${srcDays[dow]} ${pad(h)}:00 · ${valLabel(v)}</title></rect>`;
+      const box = `x="${colX(h).toFixed(1)}" y="${ry}" width="${cellW.toFixed(1)}" height="${cellH - 2}" rx="2" fill="${color(v)}"`;
+      // avg view gets an instant custom hover pill (data-tip); % empty keeps the
+      // native title since its hover is owned by the run-out reveal
+      cellRects += isEmpty
+        ? `<rect ${box}><title>${srcDays[dow]} ${pad(h)}:00 · ${valLabel(v)}</title></rect>`
+        : `<rect ${box}${v == null ? "" : ` data-tip="${srcDays[dow]} ${pad(h)}h · ${v.toFixed(1)} bikes"`}/>`;
     }
 
-    // per-day run-out: a small always-visible marker + a time pill revealed on hover
+    // per-day run-out: a small always-visible marker + a time pill revealed on
+    // hover — only in the % empty view; run-out chrome is noise on avg bikes
     const ro = runout?.[dow];
     let dot = "", reveal = "";
-    if (ro && ro.minutes != null && inWin(ro.minutes)) {
+    if (!isEmpty) {
+      // no markers, no reveal
+    } else if (ro && ro.minutes != null && inWin(ro.minutes)) {
       const mx = hx(ro.minutes);
       dot = `<polygon class="hrow__dot" points="${(mx - 2.6).toFixed(1)},${ry + 1} ${(mx + 2.6).toFixed(1)},${ry + 1} ${mx.toFixed(1)},${ry + 5}" fill="rgba(255,255,255,.8)"/>`;
       const pw = 38, ph = 15;
@@ -303,7 +311,7 @@ function renderHeatmap() {
         `<line x1="${mx.toFixed(1)}" y1="${ry}" x2="${mx.toFixed(1)}" y2="${(ry + cellH - 2).toFixed(1)}" stroke="#fff" stroke-width="1.4"/>` +
         `<rect x="${px.toFixed(1)}" y="${(cy - ph / 2).toFixed(1)}" width="${pw}" height="${ph}" rx="4" fill="#0b0e16" stroke="rgba(255,255,255,.3)"/>` +
         `<text x="${(px + pw / 2).toFixed(1)}" y="${(cy + 3.5).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" fill="#fff">${ro.time}</text>`;
-    } else {
+    } else if (isEmpty) {
       reveal = `<text x="${((gutter + W) / 2).toFixed(1)}" y="${(cy + 3.5).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--ink-dim)">rarely runs out</text>`;
     }
 
@@ -317,10 +325,10 @@ function renderHeatmap() {
       `</g>`;
   });
 
-  // dotted reference line down the weekday-average run-out time
+  // dotted reference line down the weekday-average run-out time (% empty only)
   const avgRo = lastStats.morning?.runoutAvg as { minutes: number | null; time: string | null; days: number } | undefined;
   let avgLine = "";
-  if (avgRo && avgRo.minutes != null && inWin(avgRo.minutes)) {
+  if (isEmpty && avgRo && avgRo.minutes != null && inWin(avgRo.minutes)) {
     const mx = hx(avgRo.minutes);
     const y1 = top - 2, y2 = top + 5 * cellH - 2; // span the weekday rows (Mon–Fri) only
     avgLine =
@@ -368,7 +376,7 @@ function renderHeatmap() {
     ${isEmpty ? `<text x="${barX + barW + 6}" y="${ly + 8}" font-size="10" fill="var(--ink-faint)">always empty</text>` : ""}
     ${tickMarks}`;
 
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${isEmpty ? "share of time with no bikes" : "average bikes available"} by hour and weekday, with a dotted line at the weekday-average bike run-out time">${cells}${avgLine}${hours}${legend}</svg>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${isEmpty ? "share of time with no bikes" : "average bikes available"} by hour and weekday${isEmpty ? ", with a dotted line at the weekday-average bike run-out time" : ""}">${cells}${avgLine}${hours}${legend}</svg>`;
 }
 
 // ---------- STATS ----------
@@ -457,6 +465,25 @@ $("heatWindow").addEventListener("click", (e) => {
     .forEach((x) => x.classList.toggle("is-active", x === b));
   renderHeatmap();
 });
+
+// Instant hover pill for avg-bikes cells (the native <title> tooltip is too
+// slow). Lives on <body> so re-rendering the heatmap's innerHTML can't wipe it.
+const heatTip = document.createElement("div");
+heatTip.className = "heattip";
+heatTip.hidden = true;
+document.body.appendChild(heatTip);
+$("heatmap").addEventListener("mousemove", (e) => {
+  const tip = (e.target as Element).closest("rect[data-tip]")?.getAttribute("data-tip");
+  if (!tip) {
+    heatTip.hidden = true;
+    return;
+  }
+  heatTip.textContent = tip;
+  heatTip.hidden = false;
+  heatTip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - heatTip.offsetWidth - 8)}px`;
+  heatTip.style.top = `${e.clientY - 30}px`;
+});
+$("heatmap").addEventListener("mouseleave", () => (heatTip.hidden = true));
 
 // Touch devices have no hover — let a tap on a heatmap row reveal that day's
 // run-out time (desktop keeps the hover reveal via CSS). One row open at a time.

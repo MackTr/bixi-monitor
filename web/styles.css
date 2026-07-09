@@ -478,6 +478,21 @@ body {
   font-size: 12px;
 }
 
+/* hover pill for avg-bikes heatmap cells; styled like the run-out time pill */
+.heattip {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: #0b0e16;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .empty-note {
   color: var(--ink-faint);
   font-size: 13px;
