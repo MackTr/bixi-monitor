@@ -53,6 +53,8 @@ Heatmap + weekday-morning behaviour. `tz` default `America/Toronto`. Heatmap gri
 `morning.runoutByDow[0..6]` is the **average time bikes run out** (first had-bikes→zero transition)
 for each weekday, as minutes-since-midnight + `"HH:MM"`, with the day count (`null` if it never did).
 `morning.runoutAvg` is the single weekday-wide average of that (drives the dotted reference line).
+`morning.pctEmptyByTarget` is the share of weekday mornings where bikes hit 0 **at any point**
+between the window start and `targetTime` — not a snapshot at the target instant.
 All aggregates **exclude Quebec statutory holidays** (computed server-side from the local date —
 a holiday Wednesday isn't a typical Wednesday); the excluded dates that had data in the window
 are listed in `excludedHolidays`. Episodes and raw observations are unaffected.
@@ -60,7 +62,7 @@ are listed in `excludedHolidays`. Episodes and raw observations are unaffected.
 { "station": "345", "days": 30, "tz": "America/Toronto", "capacity": 19,
   "heatmap": { "days": ["Sun","Mon",...], "avgBikes": [[...24]], "pctEmpty": [[...24]], "coverageSeconds": [[...24]] },
   "morning": { "window": ["06:00","11:00"], "targetTime": "08:30",
-    "typicalFirstEmpty": "08:12", "sampleDays": 9, "pctEmptyAtTarget": 0.67, "mornings": 12,
+    "typicalFirstEmpty": "08:12", "sampleDays": 9, "pctEmptyByTarget": 0.67, "mornings": 12,
     "runoutByDow": [ { "minutes": null, "time": null, "days": 0 }, { "minutes": 486, "time": "08:06", "days": 8 } ],
     "runoutAvg": { "minutes": 486, "time": "08:06", "days": 10 } },
   "excludedHolidays": [ { "date": "2026-07-01", "name": "Canada Day" } ],

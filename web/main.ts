@@ -387,7 +387,7 @@ function renderStats() {
     $("stats").innerHTML = `<div class="empty-note">Collecting weekday-morning stats…</div>`;
     return;
   }
-  const pctEmpty = m.pctEmptyAtTarget == null ? "—" : `${Math.round(m.pctEmptyAtTarget * 100)}%`;
+  const pctEmpty = m.pctEmptyByTarget == null ? "—" : `${Math.round(m.pctEmptyByTarget * 100)}%`;
   $("stats").innerHTML =
     tile(m.typicalFirstEmpty ?? "—", `typical first-empty (${m.window[0]}–${m.window[1]})`) +
     tile(pctEmpty, `empty by ${m.targetTime} · ${m.mornings} mornings`) +

@@ -234,7 +234,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
   // Morning behaviour, weekdays only.
   const [tH, tM] = opt.targetTime.split(":").map(Number);
   const firstEmptyMins: number[] = [];
-  let emptyAtTarget = 0;
+  let emptyByTarget = 0;
   let targetMornings = 0;
 
   const dates = new Set<string>();
@@ -262,10 +262,14 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       firstEmptyMins.push(p.hour * 60 + p.minute);
     }
 
-    const v = valueAt(wallToEpoch(y, m, d, tH, tM, opt.tz));
-    if (v) {
+    // "empty by target" = bikes hit 0 at any point between window start and the
+    // target time — not just at the target instant, which reads 0% whenever a
+    // single bike happens to be docked right then (firstEmpty is clamped to the
+    // window start, so overnight emptiness lasting into the window counts too).
+    const target = wallToEpoch(y, m, d, tH, tM, opt.tz);
+    if (valueAt(target)) {
       targetMornings++;
-      if (v.bikes <= 0) emptyAtTarget++;
+      if (firstEmpty != null && firstEmpty <= target) emptyByTarget++;
     }
   }
 
@@ -321,7 +325,7 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       targetTime: opt.targetTime,
       typicalFirstEmpty: firstEmptyMins.length ? minsToHHMM(Math.round(avg(firstEmptyMins))) : null,
       sampleDays: firstEmptyMins.length,
-      pctEmptyAtTarget: targetMornings ? emptyAtTarget / targetMornings : null,
+      pctEmptyByTarget: targetMornings ? emptyByTarget / targetMornings : null,
       mornings: targetMornings,
       runoutByDow, // [dow 0=Sun..6=Sat] { minutes, time, days } — avg time bikes hit 0
       runoutAvg, // weekday-wide average run-out time { minutes, time, days }
