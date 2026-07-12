@@ -1,5 +1,4 @@
 # BIXI Monitor — station 345 (Regina / de Verdun)
-<img width="748" height="930" alt="image" src="https://github.com/user-attachments/assets/b3e3a548-4a80-446c-a026-e29244cb5962" />
 
 Always-on monitoring + analytics for one BIXI station, on Cloudflare Workers + D1. A cron Worker
 polls the GBFS feed every minute and stores state **on change**; a versioned, CORS'd `/api/v1`
