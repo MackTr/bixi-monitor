@@ -51,6 +51,10 @@ body {
   max-width: 880px;
   margin: 0 auto;
   padding: clamp(16px, 4vw, 32px);
+  /* Home-Screen app draws under the translucent status bar / home indicator —
+     keep content out of the notch. */
+  padding-top: calc(clamp(16px, 4vw, 32px) + env(safe-area-inset-top));
+  padding-bottom: calc(clamp(16px, 4vw, 32px) + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--gap);
