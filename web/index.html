@@ -6,6 +6,11 @@
     <meta name="theme-color" content="#0b0e16" />
     <title>BIXI · Regina / de Verdun</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚲</text></svg>" />
+    <!-- Home-Screen app + Web Push (predictions arrive as notifications) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BIXI 345" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -24,6 +29,16 @@
       <!-- NOW -->
       <section class="card hero" id="hero" aria-live="polite">
         <div class="hero__loading">Loading current status…</div>
+      </section>
+
+      <!-- TOMORROW (prediction from bixi-predictor) -->
+      <section class="card">
+        <div class="card__head">
+          <h2>Tomorrow <span class="muted">· run-out forecast</span></h2>
+          <button id="notifBtn" class="notif-btn" hidden>enable alerts</button>
+        </div>
+        <div id="tomorrow" class="tomorrow"><div class="empty-note">Loading forecast…</div></div>
+        <p id="notifHint" class="muted notif-hint" hidden></p>
       </section>
 
       <!-- TODAY -->

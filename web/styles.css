@@ -537,3 +537,49 @@ body {
     transition: none !important;
   }
 }
+
+/* tomorrow (prediction card, fed by bixi-predictor) */
+.tomorrow__main {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tomorrow__time {
+  font-size: clamp(26px, 7vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.tomorrow__verdict {
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+.tomorrow__prob {
+  color: var(--ink-dim);
+  font-size: 13px;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.tomorrow .basis {
+  margin-top: 8px;
+}
+.notif-btn {
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.notif-btn.is-on {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.notif-btn:disabled {
+  opacity: 0.5;
+}
+.notif-hint {
+  margin-top: 10px;
+}

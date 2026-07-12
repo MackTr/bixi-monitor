@@ -420,6 +420,136 @@ function renderEpisodes(empty: any, full: any) {
     .join("");
 }
 
+// ---------- TOMORROW (prediction from bixi-predictor, client #2's sibling) ----------
+const PREDICTOR_API =
+  location.hostname === "localhost" ? "http://localhost:8788/api/v1" : "https://bixi-predictor.bixi.workers.dev/api/v1";
+
+async function fetchPrediction(): Promise<any | null> {
+  try {
+    const r = await fetch(`${PREDICTOR_API}/stations/${STATION}/prediction`);
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+function friendlyTarget(ds: string): string {
+  const [y, m, d] = ds.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function renderTomorrow(p: any) {
+  const el = $("tomorrow");
+  if (!p) {
+    el.innerHTML = `<div class="empty-note">No prediction yet — the first one lands tonight at 9pm.</div>`;
+    return;
+  }
+  const prob = p.probability == null ? null : Math.round(p.probability * 100);
+  const b = p.basis ?? {};
+  const how =
+    b.fallbackLevel === 0 ? "day type + weather" : b.fallbackLevel === 1 ? "day type (weather set aside)" : "broad day classes";
+  const basisLine = `${friendlyTarget(p.targetDate)} · ~${b.effectiveN != null ? Math.max(1, Math.round(b.effectiveN)) : "?"} similar days weighed · ${how}`;
+  if (p.willRunOut == null) {
+    el.innerHTML = `<div class="tomorrow__main"><b class="tomorrow__time">too early to say</b>
+      <span class="tomorrow__verdict">the model needs a few more days of history</span></div>
+      <p class="muted basis">${basisLine}</p>`;
+  } else if (!p.willRunOut) {
+    el.innerHTML = `<div class="tomorrow__main"><b class="tomorrow__time">bikes all day</b>
+      <span class="tomorrow__prob">run-out chance ${prob}%</span></div>
+      <p class="muted basis">${basisLine}</p>`;
+  } else {
+    const win = p.window ? ` · window ${p.window.early}–${p.window.late}` : "";
+    el.innerHTML = `<div class="tomorrow__main"><b class="tomorrow__time">${p.predicted.time}</b>
+      <span class="tomorrow__verdict">expected empty</span>
+      <span class="tomorrow__prob">${prob}%${win}</span></div>
+      <p class="muted basis">${basisLine}</p>`;
+  }
+}
+
+// ---------- notifications (Web Push from the predictor) ----------
+function urlBase64ToUint8Array(s: string): Uint8Array {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function initNotifications() {
+  const btn = $("notifBtn") as HTMLButtonElement;
+  const hint = $("notifHint");
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const standalone = (navigator as any).standalone === true || matchMedia("(display-mode: standalone)").matches;
+  if (!("serviceWorker" in navigator)) return;
+  // iOS only exposes PushManager to web apps launched from a Home Screen icon.
+  if (!("PushManager" in window)) {
+    if (isIOS && !standalone) {
+      hint.hidden = false;
+      hint.textContent = "Nightly 9pm alert: Share → Add to Home Screen, then open from the icon and enable alerts.";
+    }
+    return;
+  }
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  let subscribed = !!(await reg.pushManager.getSubscription());
+  btn.hidden = false;
+  const paint = () => {
+    btn.textContent = subscribed ? "alerts on · disable" : "enable alerts";
+    btn.classList.toggle("is-on", subscribed);
+  };
+  paint();
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      if (subscribed) {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetch(`${PREDICTOR_API}/push/unsubscribe`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          }).catch(() => {});
+          await sub.unsubscribe();
+        }
+        subscribed = false;
+      } else {
+        // permission must be requested inside the tap on iOS
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") {
+          hint.hidden = false;
+          hint.textContent = "Notifications are blocked for this app.";
+          return;
+        }
+        const { key } = await (await fetch(`${PREDICTOR_API}/push/vapid-public-key`)).json();
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(key) as BufferSource,
+        });
+        const res = await fetch(`${PREDICTOR_API}/push/subscribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub.toJSON()),
+        });
+        if (!res.ok) throw new Error(`subscribe ${res.status}`);
+        subscribed = true;
+        hint.hidden = true;
+      }
+    } catch (e) {
+      hint.hidden = false;
+      hint.textContent = "Couldn't update notifications — try again.";
+      console.error(e);
+    } finally {
+      btn.disabled = false;
+      paint();
+    }
+  };
+}
+
 // ---------- orchestration ----------
 async function refreshNow() {
   try {
@@ -429,12 +559,13 @@ async function refreshNow() {
   }
 }
 async function refreshAll() {
-  const [n, today, stats, epEmpty, epFull] = await Promise.all([
+  const [n, today, stats, epEmpty, epFull, prediction] = await Promise.all([
     api("now"),
     api("observations?from=" + (Math.floor(Date.now() / 1000) - 86400)),
     api("stats?days=30"),
     api("episodes?type=empty&days=30"),
     api("episodes?type=full&days=30"),
+    fetchPrediction(), // resolves null on any failure — the card degrades alone
   ]);
   // assign both before rendering: today + episodes read lastStats for holiday tags
   lastToday = today;
@@ -444,6 +575,7 @@ async function refreshAll() {
   renderHeatmap();
   renderStats();
   renderEpisodes(epEmpty, epFull);
+  renderTomorrow(prediction);
 }
 
 $("heatToggle").addEventListener("click", (e) => {
@@ -508,5 +640,6 @@ $("todayToggle").addEventListener("click", (e) => {
 });
 
 refreshAll().catch((e) => console.error(e));
+initNotifications().catch((e) => console.error(e));
 setInterval(refreshNow, 30_000);
 setInterval(() => refreshAll().catch(() => {}), 300_000);
