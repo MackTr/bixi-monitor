@@ -433,6 +433,19 @@ async function fetchPrediction(): Promise<any | null> {
   }
 }
 
+/// Past predictions that have been graded (errorMinutes backfilled once the
+/// target morning is in the books). Most recent first, per the API.
+async function fetchScoredPredictions(): Promise<any[]> {
+  try {
+    const r = await fetch(`${PREDICTOR_API}/stations/${STATION}/predictions?limit=14`);
+    if (!r.ok) return [];
+    const d = await r.json();
+    return (d.predictions ?? []).filter((p: any) => p.errorMinutes != null);
+  } catch {
+    return [];
+  }
+}
+
 function friendlyTarget(ds: string): string {
   const [y, m, d] = ds.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", {
@@ -446,7 +459,7 @@ function friendlyTarget(ds: string): string {
 function renderTomorrow(p: any) {
   const el = $("tomorrow");
   if (!p) {
-    el.innerHTML = `<div class="empty-note">No prediction yet — the first one lands tonight at 9pm.</div>`;
+    el.innerHTML = `<div class="empty-note">No prediction yet.</div>`;
     return;
   }
   const prob = p.probability == null ? null : Math.round(p.probability * 100);
@@ -481,20 +494,35 @@ function urlBase64ToUint8Array(s: string): Uint8Array {
   return out;
 }
 
+// ---------- ACCURACY (graded guesses vs the real run-out) ----------
+function renderAccuracy(scored: any[]) {
+  const el = $("accuracy");
+  const tile = (val: string, label: string) => `<div class="stat"><b>${val}</b><small>${label}</small></div>`;
+  if (!scored.length) {
+    el.innerHTML = `<div class="empty-note">Nothing graded yet — each guess gets scored against the real run-out the day after.</div>`;
+    return;
+  }
+  // errorMinutes = predicted − actual: positive = ran out before the guess.
+  const miss = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e} min early` : `${-e} min late`);
+  const last = scored[0];
+  let html = tile(
+    miss(last.errorMinutes),
+    `${friendlyTarget(last.targetDate)} · guessed ${last.predicted?.time ?? "—"} · ran out ${last.actual?.time ?? "—"}`,
+  );
+  if (scored.length > 1) {
+    const avg = Math.round(scored.reduce((s: number, p: any) => s + Math.abs(p.errorMinutes), 0) / scored.length);
+    html += tile(`±${avg} min`, `typical miss over ${scored.length} graded days`);
+  }
+  el.innerHTML = html;
+}
+
 async function initNotifications() {
   const btn = $("notifBtn") as HTMLButtonElement;
   const hint = $("notifHint");
-  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
-  const standalone = (navigator as any).standalone === true || matchMedia("(display-mode: standalone)").matches;
   if (!("serviceWorker" in navigator)) return;
-  // iOS only exposes PushManager to web apps launched from a Home Screen icon.
-  if (!("PushManager" in window)) {
-    if (isIOS && !standalone) {
-      hint.hidden = false;
-      hint.textContent = "Nightly 9pm alert: Share → Add to Home Screen, then open from the icon and enable alerts.";
-    }
-    return;
-  }
+  // iOS only exposes PushManager to web apps launched from a Home Screen icon —
+  // in a plain Safari tab the button simply stays hidden.
+  if (!("PushManager" in window)) return;
   const reg = await navigator.serviceWorker.register("/sw.js");
   let subscribed = !!(await reg.pushManager.getSubscription());
   btn.hidden = false;
@@ -559,13 +587,14 @@ async function refreshNow() {
   }
 }
 async function refreshAll() {
-  const [n, today, stats, epEmpty, epFull, prediction] = await Promise.all([
+  const [n, today, stats, epEmpty, epFull, prediction, scored] = await Promise.all([
     api("now"),
     api("observations?from=" + (Math.floor(Date.now() / 1000) - 86400)),
     api("stats?days=30"),
     api("episodes?type=empty&days=30"),
     api("episodes?type=full&days=30"),
     fetchPrediction(), // resolves null on any failure — the card degrades alone
+    fetchScoredPredictions(), // [] on failure — same deal
   ]);
   // assign both before rendering: today + episodes read lastStats for holiday tags
   lastToday = today;
@@ -576,6 +605,7 @@ async function refreshAll() {
   renderStats();
   renderEpisodes(epEmpty, epFull);
   renderTomorrow(prediction);
+  renderAccuracy(scored);
 }
 
 $("heatToggle").addEventListener("click", (e) => {
