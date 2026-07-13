@@ -39,6 +39,7 @@
           <button id="notifBtn" class="notif-btn" hidden>enable alerts</button>
         </div>
         <div id="tomorrow" class="tomorrow"><div class="empty-note">Loading forecast…</div></div>
+        <button id="recordLine" class="record-line" hidden></button>
         <p id="notifHint" class="muted notif-hint" hidden></p>
       </section>
 
@@ -91,16 +92,22 @@
         </section>
       </div>
 
-      <!-- ACCURACY (yesterday's guess vs what actually happened) -->
-      <section class="card">
-        <div class="card__head"><h2>Accuracy <span class="muted">· how close were the guesses?</span></h2></div>
-        <div id="accuracy" class="stats"></div>
-      </section>
-
       <footer class="foot muted">
         Data: BIXI GBFS · collected every minute · times in Montréal (America/Toronto)
       </footer>
     </main>
+
+    <!-- TRACK RECORD (slide-up sheet, opened from the line in the Tomorrow card) -->
+    <div class="sheet-backdrop" id="sheetBackdrop" hidden>
+      <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+        <div class="sheet__grab" aria-hidden="true"></div>
+        <div class="sheet__head">
+          <h2 id="sheetTitle">Track record <span class="muted">· last 20 days</span></h2>
+          <button class="sheet-close" id="sheetClose" aria-label="Close">✕</button>
+        </div>
+        <div id="trackRecord"></div>
+      </section>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

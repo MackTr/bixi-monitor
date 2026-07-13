@@ -433,14 +433,16 @@ async function fetchPrediction(): Promise<any | null> {
   }
 }
 
-/// Past predictions that have been graded (errorMinutes backfilled once the
-/// target morning is in the books). Most recent first, per the API.
-async function fetchScoredPredictions(): Promise<any[]> {
+/// Past predictions that have been graded. finalizedAt is set once the target
+/// morning is in the books, so actual:null on a finalized row means "never ran
+/// out", not "not scored yet". Rows the model refused to call (willRunOut
+/// null) can't be graded either way and are skipped. Most recent first.
+async function fetchTrackRecord(): Promise<any[]> {
   try {
-    const r = await fetch(`${PREDICTOR_API}/stations/${STATION}/predictions?limit=14`);
+    const r = await fetch(`${PREDICTOR_API}/stations/${STATION}/predictions?days=20`);
     if (!r.ok) return [];
-    const d = await r.json();
-    return (d.predictions ?? []).filter((p: any) => p.errorMinutes != null);
+    const d = (await r.json()) as any;
+    return (d.predictions ?? []).filter((p: any) => p.finalizedAt != null && p.willRunOut != null);
   } catch {
     return [];
   }
@@ -494,26 +496,114 @@ function urlBase64ToUint8Array(s: string): Uint8Array {
   return out;
 }
 
-// ---------- ACCURACY (graded guesses vs the real run-out) ----------
-function renderAccuracy(scored: any[]) {
-  const el = $("accuracy");
-  const tile = (val: string, label: string) => `<div class="stat"><b>${val}</b><small>${label}</small></div>`;
-  if (!scored.length) {
+// ---------- TRACK RECORD (per-day guess vs reality, in the bottom sheet) ----------
+type Scored = {
+  date: string;
+  kind: "graded" | "false-alarm" | "surprise" | "all-clear";
+  err: number | null; // predicted − actual, graded days only
+  guessed: string | null;
+  actual: string | null;
+  inWindow: boolean | null;
+};
+
+const hhmmToMins = (s: string) => {
+  const [h, m] = s.split(":").map(Number);
+  return h * 60 + m;
+};
+
+function scoreRow(p: any): Scored {
+  const guessed = p.predicted?.time ?? null;
+  const actual = p.actual?.time ?? null;
+  const kind = p.willRunOut ? (actual ? "graded" : "false-alarm") : actual ? "surprise" : "all-clear";
+  let err: number | null = null;
+  let inWindow: boolean | null = null;
+  if (kind === "graded") {
+    err = p.errorMinutes ?? p.predicted.minutes - p.actual.minutes;
+    if (p.window?.early && p.window?.late) {
+      inWindow = p.actual.minutes >= hhmmToMins(p.window.early) && p.actual.minutes <= hhmmToMins(p.window.late);
+    }
+  }
+  return { date: p.targetDate, kind, err, guessed, actual, inWindow };
+}
+
+function recordSummary(rows: Scored[]) {
+  const errs = rows
+    .filter((r) => r.kind === "graded")
+    .map((r) => Math.abs(r.err!))
+    .sort((a, b) => a - b);
+  const median = errs.length ? Math.round((errs[(errs.length - 1) >> 1] + errs[errs.length >> 1]) / 2) : null;
+  const windowed = rows.filter((r) => r.inWindow != null);
+  return {
+    median,
+    gradedN: errs.length,
+    winHit: windowed.filter((r) => r.inWindow).length,
+    winN: windowed.length,
+    // right call = the yes/no verdict matched, regardless of minutes
+    right: rows.filter((r) => r.kind === "graded" || r.kind === "all-clear").length,
+    total: rows.length,
+  };
+}
+
+// err = predicted − actual: positive = ran out before the guess ("early").
+const missLabel = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e}m early` : `${-e}m late`);
+const missColor = (e: number) => (Math.abs(e) <= 15 ? "var(--ok)" : Math.abs(e) <= 45 ? "var(--low)" : "var(--empty)");
+
+/// One-line summary at the bottom of the Tomorrow card — the sheet's tap target.
+function renderRecordLine(rows: Scored[]) {
+  const btn = $("recordLine") as HTMLButtonElement;
+  btn.hidden = false;
+  const s = recordSummary(rows);
+  const bits: string[] = [];
+  if (s.median != null) bits.push(`guesses land <b>±${s.median} min</b>`);
+  if (s.total) bits.push(`right call <b>${s.right}/${s.total} · ${Math.round((s.right / s.total) * 100)}%</b>`);
+  btn.innerHTML = `<span>${bits.length ? bits.join(" · ") : "no graded guesses yet"}</span><span class="chev">›</span>`;
+}
+
+function renderTrackRecord(rows: Scored[]) {
+  const el = $("trackRecord");
+  if (!rows.length) {
     el.innerHTML = `<div class="empty-note">Nothing graded yet — each guess gets scored against the real run-out the day after.</div>`;
     return;
   }
-  // errorMinutes = predicted − actual: positive = ran out before the guess.
-  const miss = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e} min early` : `${-e} min late`);
-  const last = scored[0];
-  let html = tile(
-    miss(last.errorMinutes),
-    `${friendlyTarget(last.targetDate)} · guessed ${last.predicted?.time ?? "—"} · ran out ${last.actual?.time ?? "—"}`,
-  );
-  if (scored.length > 1) {
-    const avg = Math.round(scored.reduce((s: number, p: any) => s + Math.abs(p.errorMinutes), 0) / scored.length);
-    html += tile(`±${avg} min`, `typical miss over ${scored.length} graded days`);
-  }
-  el.innerHTML = html;
+  const s = recordSummary(rows);
+  const tile = (val: string, label: string) => `<div class="stat"><b>${val}</b><small>${label}</small></div>`;
+  const tiles =
+    `<div class="stats stats--record">` +
+    tile(s.median != null ? `±${s.median}m` : "—", `median miss · ${s.gradedN} graded`) +
+    tile(s.winN ? `${s.winHit}/${s.winN}` : "—", "landed in window") +
+    tile(`${s.right}/${s.total} · ${Math.round((s.right / s.total) * 100)}%`, "right call, out or not") +
+    `</div>`;
+  const CHIP: Record<string, [string, string, (r: Scored) => string]> = {
+    "all-clear": ["tchip--ok", "✓ right call", () => "said bikes all day · none"],
+    "false-alarm": ["tchip--bad", "✕ false alarm", (r) => `guessed ${r.guessed} · never ran out`],
+    surprise: ["tchip--bad", "⚠ surprise run-out", (r) => `said all day · out ${r.actual}`],
+  };
+  const rowHtml = (r: Scored) => {
+    if (r.kind !== "graded") {
+      const [cls, label, sub] = CHIP[r.kind];
+      return `<div class="trow"><span class="trow__date">${shortDate(r.date)}</span>
+        <span class="trow__chiparea"><span class="tchip ${cls}">${label}</span></span>
+        <span class="trow__lbl"><small>${sub(r)}</small></span></div>`;
+    }
+    const e = r.err!;
+    // bar grows from the center (= the guess) toward when it really ran out;
+    // capped at 42% of the track ≈ a 90-minute miss, so one disaster day
+    // doesn't flatten everything else.
+    const bar =
+      e === 0
+        ? `<i class="trow__bar" style="left:calc(50% - 2px);width:4px;background:var(--ok)"></i>`
+        : `<i class="trow__bar" style="${e > 0 ? "right" : "left"}:50%;width:${Math.min(42, (Math.abs(e) * 42) / 90).toFixed(1)}%;background:${missColor(e)}"></i>`;
+    return `<div class="trow"><span class="trow__date">${shortDate(r.date)}</span>
+      <span class="trow__viz"><i class="trow__mid"></i>${bar}</span>
+      <span class="trow__lbl" style="color:${missColor(e)}">${missLabel(e)}<small>guessed ${r.guessed} · out ${r.actual}</small></span></div>`;
+  };
+  el.innerHTML =
+    tiles +
+    `<div class="track">${rows.map(rowHtml).join("")}</div>
+    <div class="track__legend"><span>◀ ran out before the guess · after ▶</span>
+      <span style="color:var(--ok)">within 15m</span>
+      <span style="color:var(--low)">within 45m</span>
+      <span style="color:var(--empty)">45m+</span></div>`;
 }
 
 async function initNotifications() {
@@ -594,7 +684,7 @@ async function refreshAll() {
     api("episodes?type=empty&days=30"),
     api("episodes?type=full&days=30"),
     fetchPrediction(), // resolves null on any failure — the card degrades alone
-    fetchScoredPredictions(), // [] on failure — same deal
+    fetchTrackRecord(), // [] on failure — same deal
   ]);
   // assign both before rendering: today + episodes read lastStats for holiday tags
   lastToday = today;
@@ -605,7 +695,9 @@ async function refreshAll() {
   renderStats();
   renderEpisodes(epEmpty, epFull);
   renderTomorrow(prediction);
-  renderAccuracy(scored);
+  const record = scored.map(scoreRow);
+  renderRecordLine(record);
+  renderTrackRecord(record);
 }
 
 $("heatToggle").addEventListener("click", (e) => {
@@ -657,6 +749,31 @@ $("heatmap").addEventListener("click", (e) => {
     .querySelectorAll(".hrow.is-open")
     .forEach((r) => r.classList.remove("is-open"));
   if (!wasOpen) row.classList.add("is-open");
+});
+
+// Track-record bottom sheet. Plain divs, no focus trap — it's a one-person
+// dashboard; ✕, backdrop tap, and Escape all close it.
+const sheetBackdrop = $("sheetBackdrop");
+let sheetHideTimer: number | undefined;
+function openSheet() {
+  clearTimeout(sheetHideTimer);
+  sheetBackdrop.hidden = false;
+  void sheetBackdrop.offsetHeight; // land the hidden→shown frame, then transition
+  sheetBackdrop.classList.add("is-open");
+  document.body.style.overflow = "hidden";
+}
+function closeSheet() {
+  sheetBackdrop.classList.remove("is-open");
+  document.body.style.overflow = "";
+  sheetHideTimer = window.setTimeout(() => (sheetBackdrop.hidden = true), 250);
+}
+$("recordLine").addEventListener("click", openSheet);
+$("sheetClose").addEventListener("click", closeSheet);
+sheetBackdrop.addEventListener("click", (e) => {
+  if (e.target === sheetBackdrop) closeSheet();
+});
+window.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key === "Escape" && !sheetBackdrop.hidden) closeSheet();
 });
 
 $("todayToggle").addEventListener("click", (e) => {
