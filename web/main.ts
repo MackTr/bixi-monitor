@@ -433,16 +433,17 @@ async function fetchPrediction(): Promise<any | null> {
   }
 }
 
-/// Past predictions that have been graded. finalizedAt is set once the target
-/// morning is in the books, so actual:null on a finalized row means "never ran
-/// out", not "not scored yet". Rows the model refused to call (willRunOut
-/// null) can't be graded either way and are skipped. Most recent first.
+/// Prediction history, official grades and not-yet-graded rows alike (the
+/// caller splits them: finalizedAt set = graded by the nightly run; today's
+/// unfinalized row can still be graded provisionally from live monitor data).
+/// Rows the model refused to call (willRunOut null) can't be graded either
+/// way and are skipped. Most recent first.
 async function fetchTrackRecord(): Promise<any[]> {
   try {
     const r = await fetch(`${PREDICTOR_API}/stations/${STATION}/predictions?days=20`);
     if (!r.ok) return [];
     const d = (await r.json()) as any;
-    return (d.predictions ?? []).filter((p: any) => p.finalizedAt != null && p.willRunOut != null);
+    return (d.predictions ?? []).filter((p: any) => p.willRunOut != null);
   } catch {
     return [];
   }
@@ -464,6 +465,13 @@ function renderTomorrow(p: any) {
     el.innerHTML = `<div class="empty-note">No prediction yet.</div>`;
     return;
   }
+  // The card header tracks the guess's target day: predictions are made once,
+  // at the 9pm run, so the latest one is about TODAY for most of the day and
+  // only about tomorrow between 9pm and midnight. A stale guess (missed cron)
+  // shows its actual date rather than lying.
+  const todayKey = dateKey(new Date());
+  $("tmrwWord").textContent =
+    p.targetDate > todayKey ? "Tomorrow" : p.targetDate === todayKey ? "Today" : shortDate(p.targetDate);
   const prob = p.probability == null ? null : Math.round(p.probability * 100);
   const b = p.basis ?? {};
   const how =
@@ -504,6 +512,7 @@ type Scored = {
   guessed: string | null;
   actual: string | null;
   inWindow: boolean | null;
+  provisional?: boolean; // graded live from monitor data, nightly run not in yet
 };
 
 const hhmmToMins = (s: string) => {
@@ -524,6 +533,34 @@ function scoreRow(p: any): Scored {
     }
   }
   return { date: p.targetDate, kind, err, guessed, actual, inWindow };
+}
+
+/// Grade today's guess the moment the run-out is visible in the monitor's own
+/// data, instead of waiting for the predictor's nightly finalize. The first
+/// empty episode that STARTED today (local) is exactly the day's first
+/// bikes>0→0 transition — the predictor's runout_minutes semantics. No episode
+/// yet = nothing to say (could still be a fine guess or a false alarm).
+function provisionalToday(raw: any[], epEmpty: any, todayKey: string): Scored | null {
+  const p = raw.find((r: any) => r.targetDate === todayKey && r.finalizedAt == null);
+  if (!p) return null;
+  const todays = ((epEmpty?.episodes ?? []) as any[])
+    .filter((e) => dateKey(new Date(e.start)) === todayKey)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  if (!todays.length) return null;
+  const actual = clockLabel(todays[0].start);
+  const actualMins = hhmmToMins(actual);
+  if (!p.willRunOut) {
+    return { date: todayKey, kind: "surprise", err: null, guessed: null, actual, inWindow: null, provisional: true };
+  }
+  return {
+    date: todayKey,
+    kind: "graded",
+    err: p.predicted.minutes - actualMins,
+    guessed: p.predicted.time,
+    actual,
+    inWindow: p.window ? actualMins >= hhmmToMins(p.window.early) && actualMins <= hhmmToMins(p.window.late) : null,
+    provisional: true,
+  };
 }
 
 function recordSummary(rows: Scored[]) {
@@ -561,8 +598,9 @@ function renderRecordLine(rows: Scored[]) {
 
 function renderTrackRecord(rows: Scored[]) {
   const el = $("trackRecord");
+  const note = `<p class="track__note">next prediction lands at 9pm — today's guess gets its official grade then too</p>`;
   if (!rows.length) {
-    el.innerHTML = `<div class="empty-note">Nothing graded yet — each guess gets scored against the real run-out the day after.</div>`;
+    el.innerHTML = `<div class="empty-note">Nothing graded yet — each guess gets scored against the real run-out.</div>` + note;
     return;
   }
   const s = recordSummary(rows);
@@ -578,12 +616,14 @@ function renderTrackRecord(rows: Scored[]) {
     "false-alarm": ["tchip--bad", "✕ false alarm", (r) => `guessed ${r.guessed} · never ran out`],
     surprise: ["tchip--bad", "⚠ surprise run-out", (r) => `said all day · out ${r.actual}`],
   };
+  const dateCell = (r: Scored) => (r.provisional ? "today" : shortDate(r.date));
+  const provTag = (r: Scored) => (r.provisional ? " · unofficial" : "");
   const rowHtml = (r: Scored) => {
     if (r.kind !== "graded") {
       const [cls, label, sub] = CHIP[r.kind];
-      return `<div class="trow"><span class="trow__date">${shortDate(r.date)}</span>
+      return `<div class="trow"><span class="trow__date">${dateCell(r)}</span>
         <span class="trow__chiparea"><span class="tchip ${cls}">${label}</span></span>
-        <span class="trow__lbl"><small>${sub(r)}</small></span></div>`;
+        <span class="trow__lbl"><small>${sub(r)}${provTag(r)}</small></span></div>`;
     }
     const e = r.err!;
     // bar grows from the center (= the guess) toward when it really ran out;
@@ -593,9 +633,9 @@ function renderTrackRecord(rows: Scored[]) {
       e === 0
         ? `<i class="trow__bar" style="left:calc(50% - 2px);width:4px;background:var(--ok)"></i>`
         : `<i class="trow__bar" style="${e > 0 ? "right" : "left"}:50%;width:${Math.min(42, (Math.abs(e) * 42) / 90).toFixed(1)}%;background:${missColor(e)}"></i>`;
-    return `<div class="trow"><span class="trow__date">${shortDate(r.date)}</span>
+    return `<div class="trow"><span class="trow__date">${dateCell(r)}</span>
       <span class="trow__viz"><i class="trow__mid"></i>${bar}</span>
-      <span class="trow__lbl" style="color:${missColor(e)}">${missLabel(e)}<small>guessed ${r.guessed} · out ${r.actual}</small></span></div>`;
+      <span class="trow__lbl" style="color:${missColor(e)}">${missLabel(e)}<small>guessed ${r.guessed} · out ${r.actual}${provTag(r)}</small></span></div>`;
   };
   el.innerHTML =
     tiles +
@@ -603,7 +643,8 @@ function renderTrackRecord(rows: Scored[]) {
     <div class="track__legend"><span>◀ ran out before the guess · after ▶</span>
       <span style="color:var(--ok)">within 15m</span>
       <span style="color:var(--low)">within 45m</span>
-      <span style="color:var(--empty)">45m+</span></div>`;
+      <span style="color:var(--empty)">45m+</span></div>` +
+    note;
 }
 
 async function initNotifications() {
@@ -695,7 +736,10 @@ async function refreshAll() {
   renderStats();
   renderEpisodes(epEmpty, epFull);
   renderTomorrow(prediction);
-  const record = scored.map(scoreRow);
+  const todayKey = dateKey(new Date());
+  const record = scored.filter((p: any) => p.finalizedAt != null).map(scoreRow);
+  const prov = provisionalToday(scored, epEmpty, todayKey);
+  if (prov) record.unshift(prov);
   renderRecordLine(record);
   renderTrackRecord(record);
 }

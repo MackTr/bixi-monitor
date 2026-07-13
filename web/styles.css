@@ -776,3 +776,9 @@ body {
   font-size: 11px;
   color: var(--ink-faint);
 }
+.track__note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+  text-align: center;
+}
