@@ -583,7 +583,7 @@ function recordSummary(rows: Scored[]) {
 
 // err = predicted − actual: positive = ran out before the guess ("early").
 const missLabel = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e}m early` : `${-e}m late`);
-const missColor = (e: number) => (Math.abs(e) <= 15 ? "var(--ok)" : Math.abs(e) <= 45 ? "var(--low)" : "var(--empty)");
+const missColor = (e: number) => (Math.abs(e) <= 10 ? "var(--ok)" : Math.abs(e) <= 30 ? "var(--low)" : "var(--empty)");
 
 /// One-line summary at the bottom of the Tomorrow card — the sheet's tap target.
 function renderRecordLine(rows: Scored[]) {
@@ -641,9 +641,9 @@ function renderTrackRecord(rows: Scored[]) {
     tiles +
     `<div class="track">${rows.map(rowHtml).join("")}</div>
     <div class="track__legend"><span>◀ ran out before the guess · after ▶</span>
-      <span style="color:var(--ok)">within 15m</span>
-      <span style="color:var(--low)">within 45m</span>
-      <span style="color:var(--empty)">45m+</span></div>` +
+      <span style="color:var(--ok)">within 10m</span>
+      <span style="color:var(--low)">within 30m</span>
+      <span style="color:var(--empty)">30m+</span></div>` +
     note;
 }
 
