@@ -109,5 +109,13 @@
       </section>
     </div>
     <script type="module" src="./main.ts"></script>
+    <!-- Cloudflare Web Analytics: privacy-first, cookieless (no consent banner
+         needed). The token is a public beacon id, not a secret — safe to commit.
+         Get it from CF dashboard → Web Analytics → this site. -->
+    <script
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "PASTE_TOKEN_HERE"}'
+    ></script>
   </body>
 </html>

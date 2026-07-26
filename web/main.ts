@@ -466,8 +466,8 @@ function renderTomorrow(p: any) {
     return;
   }
   // The card header tracks the guess's target day: predictions are made once,
-  // at the 9pm run, so the latest one is about TODAY for most of the day and
-  // only about tomorrow between 9pm and midnight. A stale guess (missed cron)
+  // at the 10pm run, so the latest one is about TODAY for most of the day and
+  // only about tomorrow between 10pm and midnight. A stale guess (missed cron)
   // shows its actual date rather than lying.
   const todayKey = dateKey(new Date());
   $("tmrwWord").textContent =
@@ -475,7 +475,11 @@ function renderTomorrow(p: any) {
   const prob = p.probability == null ? null : Math.round(p.probability * 100);
   const b = p.basis ?? {};
   const how =
-    b.fallbackLevel === 0 ? "day type + weather" : b.fallbackLevel === 1 ? "day type (weather set aside)" : "broad day classes";
+    b.fallbackLevel === 0
+      ? "day of week + rain + nudges"
+      : b.fallbackLevel === 1
+        ? "day of week + rain"
+        : "broad day classes";
   const basisLine = `${friendlyTarget(p.targetDate)} · ~${b.effectiveN != null ? Math.max(1, Math.round(b.effectiveN)) : "?"} similar days weighed · ${how}`;
   if (p.willRunOut == null) {
     el.innerHTML = `<div class="tomorrow__main"><b class="tomorrow__time">too early to say</b>
@@ -563,6 +567,13 @@ function provisionalToday(raw: any[], epEmpty: any, todayKey: string): Scored | 
   };
 }
 
+// err = predicted − actual: positive = ran out before the guess ("early").
+const MISS_OK_MAX = 10; // green
+const MISS_WARN_MAX = 30; // yellow; beyond this a guess is a miss, full stop
+const missLabel = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e}m early` : `${-e}m late`);
+const missColor = (e: number) =>
+  Math.abs(e) <= MISS_OK_MAX ? "var(--ok)" : Math.abs(e) <= MISS_WARN_MAX ? "var(--low)" : "var(--empty)";
+
 function recordSummary(rows: Scored[]) {
   const errs = rows
     .filter((r) => r.kind === "graded")
@@ -575,15 +586,15 @@ function recordSummary(rows: Scored[]) {
     gradedN: errs.length,
     winHit: windowed.filter((r) => r.inWindow).length,
     winN: windowed.length,
-    // right call = the yes/no verdict matched, regardless of minutes
-    right: rows.filter((r) => r.kind === "graded" || r.kind === "all-clear").length,
+    // right call = the verdict matched AND, when a time was guessed, it was
+    // close enough to act on (the yellow threshold). At a station that runs
+    // out every day, the yes/no verdict alone is a free 100%.
+    right: rows.filter(
+      (r) => r.kind === "all-clear" || (r.kind === "graded" && Math.abs(r.err!) <= MISS_WARN_MAX),
+    ).length,
     total: rows.length,
   };
 }
-
-// err = predicted − actual: positive = ran out before the guess ("early").
-const missLabel = (e: number) => (e === 0 ? "spot on" : e > 0 ? `${e}m early` : `${-e}m late`);
-const missColor = (e: number) => (Math.abs(e) <= 10 ? "var(--ok)" : Math.abs(e) <= 30 ? "var(--low)" : "var(--empty)");
 
 /// One-line summary at the bottom of the Tomorrow card — the sheet's tap target.
 function renderRecordLine(rows: Scored[]) {
@@ -598,7 +609,7 @@ function renderRecordLine(rows: Scored[]) {
 
 function renderTrackRecord(rows: Scored[]) {
   const el = $("trackRecord");
-  const note = `<p class="track__note">next prediction lands at 9pm — today's guess gets its official grade then too</p>`;
+  const note = `<p class="track__note">next prediction lands at 10pm — today's guess gets its official grade then too</p>`;
   if (!rows.length) {
     el.innerHTML = `<div class="empty-note">Nothing graded yet — each guess gets scored against the real run-out.</div>` + note;
     return;
@@ -609,7 +620,7 @@ function renderTrackRecord(rows: Scored[]) {
     `<div class="stats stats--record">` +
     tile(s.median != null ? `±${s.median}m` : "—", `median miss · ${s.gradedN} graded`) +
     tile(s.winN ? `${s.winHit}/${s.winN}` : "—", "landed in window") +
-    tile(`${s.right}/${s.total} · ${Math.round((s.right / s.total) * 100)}%`, "right call, out or not") +
+    tile(`${s.right}/${s.total} · ${Math.round((s.right / s.total) * 100)}%`, `right call · within ${MISS_WARN_MAX}m`) +
     `</div>`;
   const CHIP: Record<string, [string, string, (r: Scored) => string]> = {
     "all-clear": ["tchip--ok", "✓ right call", () => "said bikes all day · none"],
@@ -641,9 +652,9 @@ function renderTrackRecord(rows: Scored[]) {
     tiles +
     `<div class="track">${rows.map(rowHtml).join("")}</div>
     <div class="track__legend"><span>◀ ran out before the guess · after ▶</span>
-      <span style="color:var(--ok)">within 10m</span>
-      <span style="color:var(--low)">within 30m</span>
-      <span style="color:var(--empty)">30m+</span></div>` +
+      <span style="color:var(--ok)">within ${MISS_OK_MAX}m</span>
+      <span style="color:var(--low)">within ${MISS_WARN_MAX}m</span>
+      <span style="color:var(--empty)">${MISS_WARN_MAX}m+</span></div>` +
     note;
 }
 
