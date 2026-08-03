@@ -782,3 +782,126 @@ body {
   color: var(--ink-faint);
   text-align: center;
 }
+
+/* ---------- MODEL RACE (shadow A/B, read-only) ---------- */
+.race__head {
+  font-size: 12px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+.race__row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.race__row:first-of-type {
+  border-top: 0;
+}
+.race__name {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  font-size: 14px;
+}
+.race__name small {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ink-faint);
+  line-height: 1.3;
+}
+/* The three bars share one time axis, so widths are directly comparable. */
+.race__track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--card-2);
+}
+.race__band {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(91, 209, 192, 0.25), rgba(91, 209, 192, 0.55));
+}
+.race__dot {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--card);
+}
+.race__time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 15px;
+}
+.race__none {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.race__score {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.race__srow {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.race__srow span:first-child {
+  font-weight: 600;
+}
+.race__srow b {
+  font-variant-numeric: tabular-nums;
+}
+.race__srow small {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.race__srow--head,
+.race__srow--head span:first-child {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.race__note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+.race__note--warn {
+  color: var(--low);
+}
+.race__note code {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--card-2);
+  color: var(--ink-dim);
+}
+@media (max-width: 420px) {
+  .race__row {
+    grid-template-columns: minmax(84px, 1fr) minmax(0, 1.4fr) auto;
+    gap: 8px;
+  }
+  .race__name small {
+    display: none;
+  }
+}

@@ -720,6 +720,138 @@ async function initNotifications() {
   };
 }
 
+// ---------- MODEL RACE (bixi-forecaster, client #3) ----------
+//
+// A read-only window onto the shadow A/B. This dashboard still shows, and still
+// gets notified about, the GAUSSIAN prediction in the Tomorrow card above —
+// that arm is the control, and moving push to a challenger mid-window would
+// confound the very comparison this card displays. So: look, don't act on it.
+//
+// Every number here is computed by the forecaster's own /compare, which grades
+// all arms with one piece of code against one definition of the actual. Nothing
+// is re-derived client-side; a second definition of "error" living in the
+// dashboard would eventually disagree with the service and be believed anyway.
+const FORECASTER_API =
+  location.hostname === "localhost" ? "http://localhost:8789/api/v1" : "https://bixi-forecaster.bixi.workers.dev/api/v1";
+
+// The pre-registered sample size from the forecaster's docs/model.md. Shown as a
+// progress count so the card can never be mistaken for a verdict before it is
+// entitled to one.
+const RACE_TARGET_NIGHTS = 40;
+
+const ARMS: { key: string; label: string; note: string }[] = [
+  { key: "gaussian", label: "Gaussian", note: "the control · this is what notifies you" },
+  { key: "ml", label: "ML", note: "trained on 27M trips network-wide" },
+  { key: "blend", label: "Blend", note: "confidence-gated mix of both" },
+];
+
+async function fetchRace(): Promise<{ compare: any; preds: any[] } | null> {
+  try {
+    const [cr, pr] = await Promise.all([
+      fetch(`${FORECASTER_API}/compare?days=60`),
+      fetch(`${FORECASTER_API}/stations/${STATION}/predictions?days=3&all=1`),
+    ]);
+    if (!cr.ok) return null;
+    const compare = (await cr.json()) as any;
+    const preds = pr.ok ? ((await pr.json()) as any).predictions ?? [] : [];
+    return { compare, preds };
+  } catch {
+    return null; // the whole card hides; the rest of the dashboard is unaffected
+  }
+}
+
+const hhmmToMin = (s: string | null | undefined): number | null => {
+  if (!s) return null;
+  const [h, m] = s.split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+};
+
+function renderRace(data: { compare: any; preds: any[] } | null) {
+  const card = $("raceCard");
+  if (!data) return; // stays hidden — a forecaster outage must not blank the dashboard
+  card.hidden = false;
+  const { compare, preds } = data;
+
+  // The most recent night every arm has an opinion about.
+  const latest = preds.reduce((a: string | null, p: any) => (a == null || p.targetDate > a ? p.targetDate : a), null);
+  const tonight = preds.filter((p: any) => p.targetDate === latest);
+
+  // One shared time axis, so the three bars are directly comparable — a window
+  // scaled to its own arm would make the widest one look the most confident.
+  const lows = tonight.map((p: any) => hhmmToMin(p.window?.early)).filter((v: number | null) => v != null) as number[];
+  const highs = tonight.map((p: any) => hhmmToMin(p.window?.late)).filter((v: number | null) => v != null) as number[];
+  const lo = lows.length ? Math.min(...lows) : 0;
+  const hi = highs.length ? Math.max(...highs) : 0;
+  const span = hi - lo;
+  const pct = (m: number) => (span > 0 ? ((m - lo) / span) * 100 : 0);
+
+  const armRow = (arm: typeof ARMS[number]) => {
+    const p = tonight.find((x: any) => x.variant === arm.key);
+    if (!p) return `<div class="race__row"><span class="race__name">${arm.label}</span><span class="race__none">no row</span></div>`;
+    if (!p.predicted) {
+      return `<div class="race__row"><span class="race__name">${arm.label}</span>
+        <span class="race__none">says it won't run out${p.probability != null ? ` · p=${p.probability}` : ""}</span></div>`;
+    }
+    const e = hhmmToMin(p.window?.early);
+    const l = hhmmToMin(p.window?.late);
+    const mid = hhmmToMin(p.predicted.time)!;
+    const bar =
+      e != null && l != null && span > 0
+        ? `<i class="race__band" style="left:${pct(e).toFixed(1)}%;width:${(pct(l) - pct(e)).toFixed(1)}%"></i>`
+        : "";
+    return `<div class="race__row">
+      <span class="race__name">${arm.label}<small>${arm.note}</small></span>
+      <span class="race__track">${bar}<i class="race__dot" style="left:${pct(mid).toFixed(1)}%"></i></span>
+      <span class="race__time">${p.predicted.time}</span></div>`;
+  };
+
+  const graded: number = compare.gradedNights ?? 0;
+  $("raceProgress").textContent = `${graded}/${RACE_TARGET_NIGHTS} nights`;
+
+  // Wins are only meaningful against the control, so that is the only pairing
+  // shown. `paired` may list either arm first; orient before reading it.
+  const vsControl = (key: string) => {
+    const p = (compare.paired ?? []).find(
+      (x: any) => (x.a === key && x.b === "gaussian") || (x.a === "gaussian" && x.b === key),
+    );
+    if (!p || !p.n) return null;
+    const flip = p.a === "gaussian";
+    return { wins: flip ? p.bWins : p.aWins, n: p.n };
+  };
+
+  const scoreRows = ARMS.map((arm) => {
+    const s = (compare.scores ?? []).find((x: any) => x.variant === arm.key);
+    if (!s || s.n === 0) return `<div class="race__srow"><span>${arm.label}</span><span class="muted">—</span><span></span></div>`;
+    const w = arm.key === "gaussian" ? null : vsControl(arm.key);
+    return `<div class="race__srow">
+      <span>${arm.label}</span>
+      <span><b>±${Math.round(s.mae)}m</b><small>${s.bias > 0 ? "runs late" : s.bias < 0 ? "runs early" : "centred"}</small></span>
+      <span>${w ? `${w.wins}/${w.n} nights` : "<small>control</small>"}</span></div>`;
+  }).join("");
+
+  const verdict =
+    graded < RACE_TARGET_NIGHTS
+      ? `<p class="race__note">${RACE_TARGET_NIGHTS - graded} more nights before this can be called. At this
+         sample only a gap of ~${compare.interpretation?.detectableEffectMinutes ?? 22} min would be
+         distinguishable from luck — a smaller lead is noise, however good it looks.</p>`
+      : `<p class="race__note">${graded} nights in. Read the full decision rule with
+         <code>npm run scoreboard</code> — MAE alone does not settle it.</p>`;
+
+  const mismatch = (compare.seedMismatches ?? []).length
+    ? `<p class="race__note race__note--warn">⚠ ${compare.seedMismatches.length} night(s) where the arms started
+       from different 10pm inventories — that is a flaw in the experiment, not a result.</p>`
+    : "";
+
+  $("race").innerHTML =
+    `<div class="race__head">${latest ? friendlyTarget(latest) : "tonight"}</div>` +
+    ARMS.map(armRow).join("") +
+    (graded
+      ? `<div class="race__score"><div class="race__srow race__srow--head"><span>after ${graded} night${graded === 1 ? "" : "s"}</span><span>typical miss</span><span>vs control</span></div>${scoreRows}</div>`
+      : "") +
+    mismatch +
+    verdict;
+}
+
 // ---------- orchestration ----------
 async function refreshNow() {
   try {
@@ -729,7 +861,7 @@ async function refreshNow() {
   }
 }
 async function refreshAll() {
-  const [n, today, stats, epEmpty, epFull, prediction, scored] = await Promise.all([
+  const [n, today, stats, epEmpty, epFull, prediction, scored, race] = await Promise.all([
     api("now"),
     api("observations?from=" + (Math.floor(Date.now() / 1000) - 86400)),
     api("stats?days=30"),
@@ -737,6 +869,7 @@ async function refreshAll() {
     api("episodes?type=full&days=30"),
     fetchPrediction(), // resolves null on any failure — the card degrades alone
     fetchTrackRecord(), // [] on failure — same deal
+    fetchRace(), // null on failure — the race card stays hidden, nothing else moves
   ]);
   // assign both before rendering: today + episodes read lastStats for holiday tags
   lastToday = today;
@@ -747,6 +880,7 @@ async function refreshAll() {
   renderStats();
   renderEpisodes(epEmpty, epFull);
   renderTomorrow(prediction);
+  renderRace(race);
   const todayKey = dateKey(new Date());
   const record = scored.filter((p: any) => p.finalizedAt != null).map(scoreRow);
   const prov = provisionalToday(scored, epEmpty, todayKey);

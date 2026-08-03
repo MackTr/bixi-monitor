@@ -43,6 +43,15 @@
         <p id="notifHint" class="muted notif-hint" hidden></p>
       </section>
 
+      <!-- MODEL RACE (shadow A/B from bixi-forecaster; read-only, no push) -->
+      <section class="card" id="raceCard" hidden>
+        <div class="card__head">
+          <h2>Model race <span class="muted">· two forecasters, same night</span></h2>
+          <span class="muted" id="raceProgress"></span>
+        </div>
+        <div id="race" class="race"></div>
+      </section>
+
       <!-- TODAY -->
       <section class="card">
         <div class="card__head">
