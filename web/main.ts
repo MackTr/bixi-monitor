@@ -1468,9 +1468,12 @@ $("raceDates").addEventListener("click", (e) => {
   if (!b || !lastRace || b.dataset.date === raceDate) return;
   raceDate = b.dataset.date!;
   renderRace(lastRace);
-  // Choosing a finished morning is a request to watch it finish. gpPlay still
-  // declines on reduced-motion or a hidden tab.
-  gpPlay();
+  // Choosing a morning is a request to watch it run, exactly as much as a press
+  // of ↻ is — so it forces past reduced-motion the same way, and for the same
+  // reason: the motion was asked for. Unforced, this was a dead tab strip on a
+  // reduced-motion desktop while the identical tap animated on a phone.
+  // A hidden tab still refuses, because rAF genuinely does not run there.
+  gpPlay(true);
 });
 
 // Frames stop arriving the moment the tab is backgrounded. Land on the resting
