@@ -170,6 +170,8 @@ export interface StatsOptions {
   windowStartHour: number; // e.g. 6
   windowEndHour: number; // e.g. 11
   targetTime: string; // "HH:MM"
+  commuteStart: string; // "HH:MM" — narrow band reported as its own share
+  commuteEnd: string; // "HH:MM"
   holidayName?: (dateStr: string) => string | null; // local YYYY-MM-DD -> holiday name
 }
 
@@ -233,9 +235,14 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
 
   // Morning behaviour, weekdays only.
   const [tH, tM] = opt.targetTime.split(":").map(Number);
+  const [csH, csM] = opt.commuteStart.split(":").map(Number);
+  const [ceH, ceM] = opt.commuteEnd.split(":").map(Number);
   const firstEmptyMins: number[] = [];
   let emptyByTarget = 0;
   let targetMornings = 0;
+  let commuteEmptySec = 0;
+  let commuteSec = 0;
+  let commuteMornings = 0;
 
   const dates = new Set<string>();
   for (const iv of intervals) {
@@ -271,20 +278,43 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       targetMornings++;
       if (firstEmpty != null && firstEmpty <= target) emptyByTarget++;
     }
-  }
 
-  // Longest empty streak across the whole range.
-  let longest = 0;
-  let estart: number | null = null;
-  for (const r of rows) {
-    if (r.bikes <= 0) {
-      if (estart == null) estart = r.ts;
-    } else if (estart != null) {
-      longest = Math.max(longest, r.ts - estart);
-      estart = null;
+    // The commute band, counted separately from "empty by target". The two
+    // answer different questions: a rack that emptied at 06:10 and was refilled
+    // by 07:00 counts as empty-by-08:30 but is irrelevant to someone leaving at
+    // 07:45.
+    //
+    // This is a SHARE OF TIME — empty seconds over observed seconds inside the
+    // band — not a share of mornings, so a 5-minute gap weighs far less than a
+    // 40-minute one. Same duration-weighted basis as the heatmap above, which
+    // is what lets the tile and the 07h/08h heatmap columns be read together.
+    //
+    // Pooled across mornings rather than averaged per morning. The two are
+    // identical while every morning contributes the same 60 minutes, and pooling
+    // degrades more sensibly than a mean of ratios if one morning is ever
+    // partially observed.
+    //
+    // The morning counter is only for display ("over N mornings") and its guard
+    // matches pctEmptyByTarget's deliberately, so both tiles mean the same thing
+    // by "a counted morning". Note what that guard does not do: toIntervals()
+    // bridges gaps by holding the last observed value, so it rejects only bands
+    // outside the series entirely (before the first observation, or not yet
+    // elapsed). A long collector outage is carried as a stale reading rather
+    // than excluded — true of every aggregate in this file, and tolerable
+    // because the collector polls every ~2min.
+    const cStart = wallToEpoch(y, m, d, csH, csM, opt.tz);
+    const cEnd = wallToEpoch(y, m, d, ceH, ceM, opt.tz);
+    if (valueAt(cStart) && valueAt(cEnd)) {
+      commuteMornings++;
+      for (const iv of intervals) {
+        const s = Math.max(iv.t0, cStart);
+        const e = Math.min(iv.t1, cEnd);
+        if (e <= s) continue;
+        commuteSec += e - s;
+        if (iv.bikes <= 0) commuteEmptySec += e - s;
+      }
     }
   }
-  if (estart != null) longest = Math.max(longest, opt.now - estart);
 
   // When do bikes actually run out? First transition (had bikes -> zero) per local
   // day, averaged by weekday — so the heatmap can mark the typical run-out moment.
@@ -327,13 +357,17 @@ export function computeStats(rows: ObsRow[], opt: StatsOptions) {
       sampleDays: firstEmptyMins.length,
       pctEmptyByTarget: targetMornings ? emptyByTarget / targetMornings : null,
       mornings: targetMornings,
+      commute: {
+        window: [opt.commuteStart, opt.commuteEnd],
+        pctEmpty: commuteSec ? commuteEmptySec / commuteSec : null,
+        mornings: commuteMornings,
+      },
       runoutByDow, // [dow 0=Sun..6=Sat] { minutes, time, days } — avg time bikes hit 0
       runoutAvg, // weekday-wide average run-out time { minutes, time, days }
     },
     excludedHolidays: [...excluded]
       .map(([date, name]) => ({ date, name }))
       .sort((a, b) => (a.date < b.date ? -1 : 1)),
-    longestEmptyMinutes: Math.round(longest / 60),
   };
 }
 

@@ -382,17 +382,28 @@ function renderHeatmap() {
 // ---------- STATS ----------
 function renderStats() {
   const m = lastStats?.morning;
-  const tile = (val: string, label: string) => `<div class="stat"><b>${val}</b><small>${label}</small></div>`;
+  // label above, value, qualifier below — the qualifier carries the sample size
+  // and the basis so the big number never has to be read with a caveat in mind.
+  const tile = (label: string, val: string, note: string) =>
+    `<div class="stat"><span class="stat__label">${label}</span><b>${val}</b><small>${note}</small></div>`;
   if (!m) {
+    $("statsSub").textContent = "";
     $("stats").innerHTML = `<div class="empty-note">Collecting weekday-morning stats…</div>`;
     return;
   }
   const pctEmpty = m.pctEmptyByTarget == null ? "—" : `${Math.round(m.pctEmptyByTarget * 100)}%`;
+  const c = m.commute;
+  const pctCommute = c?.pctEmpty == null ? "—" : `${Math.round(c.pctEmpty * 100)}%`;
+  $("statsSub").textContent = `over ${m.mornings} weekday morning${m.mornings === 1 ? "" : "s"}`;
   $("stats").innerHTML =
-    tile(m.typicalFirstEmpty ?? "—", `typical first-empty (${m.window[0]}–${m.window[1]})`) +
-    tile(pctEmpty, `empty by ${m.targetTime} · ${m.mornings} mornings`) +
-    tile(durLabel(lastStats.longestEmptyMinutes ?? 0), "longest empty streak") +
-    tile(String(m.sampleDays ?? 0), "mornings it ran dry");
+    tile("First empty", m.typicalFirstEmpty ?? "—", `typical, ${m.window[0]}–${m.window[1]}`) +
+    tile(`Empty by ${m.targetTime}`, pctEmpty, `${m.mornings} mornings`) +
+    tile(
+      `Empty ${c?.window[0] ?? "—"}–${c?.window[1] ?? "—"}`,
+      pctCommute,
+      `share of time, ${c?.mornings ?? 0} mornings`,
+    ) +
+    tile("Mornings dry", String(m.sampleDays ?? 0), "ran out during the window");
 }
 
 // ---------- EPISODES ----------

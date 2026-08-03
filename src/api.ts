@@ -207,6 +207,8 @@ async function stats(env: Env, station: Station, url: URL): Promise<Response> {
     windowStartHour: 6,
     windowEndHour: 11,
     targetTime: "08:30",
+    commuteStart: "07:30",
+    commuteEnd: "08:30",
     holidayName,
   });
   return json({ station: station.id, days, tz, capacity: station.capacity, ...out });
