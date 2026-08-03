@@ -706,7 +706,7 @@ async function initNotifications() {
           hint.textContent = "Notifications are blocked for this app.";
           return;
         }
-        const { key } = await (await fetch(`${PREDICTOR_API}/push/vapid-public-key`)).json();
+        const { key } = (await (await fetch(`${PREDICTOR_API}/push/vapid-public-key`)).json()) as { key: string };
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(key) as BufferSource,
@@ -738,10 +738,22 @@ async function initNotifications() {
 // that arm is the control, and moving push to a challenger mid-window would
 // confound the very comparison this card displays. So: look, don't act on it.
 //
-// Every number here is computed by the forecaster's own /compare, which grades
-// all arms with one piece of code against one definition of the actual. Nothing
-// is re-derived client-side; a second definition of "error" living in the
-// dashboard would eventually disagree with the service and be believed anyway.
+// Station 345 drains on weekday MORNINGS: the 10pm inventory is the seed and
+// every time here is a moment in the following morning's commute. The strip
+// therefore runs left-to-right across one morning, not one night.
+//
+// WHY IT IS DRAWN AS A RACE. The finish line is the truth — the moment the last
+// bike actually went — and each arm brakes where it thinks that moment is.
+// Braking early is guessing early; sailing past the line is guessing late. Both
+// are misses, and the winner is whoever stops nearest. That inversion is the
+// point: a bare time axis makes the latest guess look like the leader, which is
+// exactly backwards.
+//
+// Every aggregate below is the forecaster's own /compare, which grades all arms
+// with one piece of code against one definition of the actual. A second
+// definition of "error" living in the dashboard would eventually disagree with
+// the service and be believed anyway. nightWinners() is the one derived thing
+// here, and it is careful about it.
 const FORECASTER_API =
   location.hostname === "localhost" ? "http://localhost:8789/api/v1" : "https://bixi-forecaster.bixi.workers.dev/api/v1";
 
@@ -750,17 +762,23 @@ const FORECASTER_API =
 // entitled to one.
 const RACE_TARGET_NIGHTS = 40;
 
-const ARMS: { key: string; label: string; note: string }[] = [
-  { key: "gaussian", label: "Gaussian", note: "the control · this is what notifies you" },
-  { key: "ml", label: "ML", note: "trained on 27M trips network-wide" },
-  { key: "blend", label: "Blend", note: "confidence-gated mix of both" },
+// One fixed hue per arm, never reassigned by rank — the control keeps its colour
+// whether it is leading or last, so a change in the standings can never look
+// like a change in who is who. Checked for >=3:1 against --card and for
+// deuteran/protan separation before being used.
+const ARMS: { key: string; label: string; note: string; c: string }[] = [
+  { key: "gaussian", label: "Gaussian", note: "the control · this is what alerts you", c: "#e0484d" },
+  { key: "ml", label: "ML", note: "trained on 27M trips network-wide", c: "#7a72e8" },
+  { key: "blend", label: "Blend", note: "confidence-gated mix of both", c: "#2fa896" },
 ];
 
 async function fetchRace(): Promise<{ compare: any; preds: any[] } | null> {
   try {
     const [cr, pr] = await Promise.all([
       fetch(`${FORECASTER_API}/compare?days=60`),
-      fetch(`${FORECASTER_API}/stations/${STATION}/predictions?days=3&all=1`),
+      // 60 days rather than 3: the form guide needs the whole shadow window
+      // behind it. The strip still only ever draws the latest morning out of it.
+      fetch(`${FORECASTER_API}/stations/${STATION}/predictions?days=60&all=1`),
     ]);
     if (!cr.ok) return null;
     const compare = (await cr.json()) as any;
@@ -771,97 +789,559 @@ async function fetchRace(): Promise<{ compare: any; preds: any[] } | null> {
   }
 }
 
+// Strict on purpose. The forecaster's minsToHHMM() formats a negative minute as
+// nonsense — `ml` published window.early "-1:-15" for 2026-08-03, meaning a
+// bound 15 minutes BEFORE midnight — and a lenient split() reads that as -75,
+// which stretches the strip's time axis across the entire day. Anything that is
+// not a real wall clock is treated as absent.
 const hhmmToMin = (s: string | null | undefined): number | null => {
-  if (!s) return null;
-  const [h, m] = s.split(":").map(Number);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s ?? "");
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mm = Number(m[2]);
+  return h < 24 && mm < 60 ? h * 60 + mm : null;
 };
+
+// Always prefer the numeric bound. Forecaster minutes are measured from the
+// TARGET day's midnight and go NEGATIVE for the previous evening — simulate.ts
+// starts at -120 (22:00 the night before) — and a wall clock cannot carry that:
+// "23:45" parses back to 1425 and would sort after a morning it precedes. The
+// string is only a fallback for a forecaster deployed before window.*Minutes.
+const windowMin = (w: any, side: "early" | "late"): number | null => {
+  const n = w?.[`${side}Minutes`];
+  return typeof n === "number" ? n : hhmmToMin(w?.[side]);
+};
+
+// Minutes-from-target-midnight to a short wall clock. These are commute-hour
+// times, so the am/pm suffix is what makes "9:23" unambiguous at a glance.
+//
+// Minutes go NEGATIVE for the previous evening, and JavaScript's % keeps the
+// sign of the dividend — the same trap that made the forecaster publish
+// "-1:-15". Floor into range so -15 reads as 11:45p. This is not hypothetical
+// here: window bounds routinely land before midnight, and an axis tick can too
+// once the low end of the range is negative.
+function gpClock(mins: number): string {
+  const wrap = (n: number, m: number) => ((n % m) + m) % m;
+  const h24 = wrap(Math.floor(mins / 60), 24);
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${pad(wrap(mins, 60))}${h24 < 12 ? "a" : "p"}`;
+}
+
+// Which arm was closest each morning. /compare publishes only totals, so the
+// per-morning marks in the form guide have to be read off the rows — but under
+// the server's own rule, not a new one: both arms are measured against a SINGLE
+// actual for the date, and a date where the arms disagree about the truth is
+// dropped rather than guessed at (the same fault seedMismatches reports). The
+// error values themselves are the server's `errorMinutes`, never recomputed.
+function nightWinners(byDate: Map<string, any[]>): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const [d, rows] of byDate) {
+    const scored = rows.filter((r: any) => r.finalizedAt != null && r.actual != null && r.errorMinutes != null);
+    if (scored.length < 2) continue;
+    if (new Set(scored.map((r: any) => r.actual.minutes)).size > 1) continue;
+    let bestErr = Infinity;
+    let best: string | null = null;
+    let tie = false;
+    for (const r of scored) {
+      const e = Math.abs(r.errorMinutes);
+      if (e < bestErr) {
+        bestErr = e;
+        best = r.variant;
+        tie = false;
+      } else if (e === bestErr) tie = true;
+    }
+    out.set(d, tie ? null : best);
+  }
+  return out;
+}
+
+// ---------- the strip ----------
+// Geometry in viewBox units; the SVG scales to the card. V and DB are the car's
+// speed and braking distance — all three cars run at the SAME speed so that the
+// only thing the eye tracks is where each one hit the brakes, which is the only
+// thing the model actually decided.
+// TX/TW are the asphalt; L/R are the span the clock maps onto, inset far enough
+// from the left edge to leave every car a run-up longer than its braking
+// distance. The gutter left of TX belongs to the lane labels.
+const GP = { TOP: 46, LANE: 38, TX: 88, TW: 586, L: 170, R: 650, X0: 96, V: 300, DB: 58 };
+const GP_SEEN = "bixi.gp.lastPlayed";
+const gpLaneY = (i: number) => GP.TOP + GP.LANE * i + GP.LANE / 2;
+const gpReduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+const GP_CAR =
+  '<g id="gpcar">' +
+  '<rect x="-19" y="-7" width="4.5" height="14" rx="1" fill="currentColor"/>' +
+  '<rect x="-14.5" y="-10.5" width="9.5" height="6" rx="2" fill="#0a0d14"/>' +
+  '<rect x="-14.5" y="4.5" width="9.5" height="6" rx="2" fill="#0a0d14"/>' +
+  '<rect x="4" y="-10" width="8.5" height="5.5" rx="2" fill="#0a0d14"/>' +
+  '<rect x="4" y="4.5" width="8.5" height="5.5" rx="2" fill="#0a0d14"/>' +
+  '<path d="M18 0 L7 -3.5 L-15 -5 L-15 5 L7 3.5 Z" fill="currentColor"/>' +
+  '<rect x="-9" y="-7.5" width="13" height="15" rx="3.5" fill="currentColor"/>' +
+  '<rect x="15" y="-8" width="3.5" height="16" rx="1" fill="currentColor"/>' +
+  '<circle cx="-2.5" cy="0" r="3" fill="#0a0d14" opacity=".55"/></g>';
+
+interface GpLane {
+  y: number;
+  p: number; // where this car stops
+  bp: number; // where it starts braking
+  db: number;
+  tb: number; // seconds until the brakes come on
+  td: number; // seconds spent braking
+  a: number; // deceleration
+  car: SVGElement;
+  brake: SVGElement;
+  skid: SVGElement;
+  gap: SVGElement | null;
+}
+
+let gpPlan: GpLane[] = [];
+let gpRaf: number | null = null;
+let gpSig = ""; // last-rendered content; keeps the 5-minute poll from restarting a run
+let gpFocusX: number | null = null; // centre of the action, in viewBox units
+// Which morning the strip is showing, and the payload to redraw from when that
+// changes without a refetch. `raceDate` survives the 5-minute poll so a chosen
+// morning is not yanked back to the default under the reader.
+let raceDate: string | null = null;
+let lastRace: { compare: any; preds: any[] } | null = null;
+
+// Keep the interesting part of the strip in view when it is too wide to fit.
+// Called on render and again on resize: a phone rotated from portrait to
+// landscape re-lays-out without re-rendering, and the finish line would
+// otherwise be left off the right edge where nobody would think to look.
+function gpParkScroll() {
+  const box = $("raceTrack").parentElement;
+  if (!box || gpFocusX == null) return;
+  if (box.scrollWidth <= box.clientWidth) {
+    box.scrollLeft = 0;
+    return;
+  }
+  box.scrollLeft = Math.max(0, gpFocusX * (box.scrollWidth / 700) - box.clientWidth / 2);
+}
+
+const gapLabel = (err: number) => (err === 0 ? "on the line" : err < 0 ? `${-err}m early` : `${err}m late`);
+
+function renderTrack(rows: any[], graded: boolean) {
+  const svg = $("raceTrack");
+  const lanes = ARMS.map((arm) => {
+    const r = rows.find((x: any) => x.variant === arm.key) ?? null;
+    return {
+      arm,
+      row: r,
+      pred: (r?.predicted?.minutes ?? null) as number | null,
+      early: windowMin(r?.window, "early"),
+      late: windowMin(r?.window, "late"),
+      err: typeof r?.errorMinutes === "number" ? (r.errorMinutes as number) : null,
+    };
+  });
+
+  // One actual for the whole morning. Arms that were graded against different
+  // truths are a fault in the experiment, not a result — draw no line at all
+  // rather than pick one of them to believe.
+  const truths = new Set(rows.filter((r: any) => r.actual != null).map((r: any) => r.actual.minutes as number));
+  const actual = truths.size === 1 ? [...truths][0] : null;
+
+  // Anchor the clock on the things that are certainly times — the point
+  // forecasts and the actual — then let windows widen it only if they land
+  // within a morning's reach of that core. One malformed bound upstream should
+  // cost the strip a shaded band, not its whole axis.
+  const core: number[] = [];
+  for (const l of lanes) if (l.pred != null) core.push(l.pred);
+  if (actual != null) core.push(actual);
+  if (!core.length) {
+    svg.innerHTML = "";
+    $("raceGuesses").innerHTML = "";
+    gpPlan = [];
+    return;
+  }
+  let lo = Math.min(...core);
+  let hi = Math.max(...core);
+  for (const l of lanes)
+    for (const v of [l.early, l.late])
+      if (v != null && v > lo - 180 && v < hi + 180) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+  const margin = Math.max(18, (hi - lo) * 0.14);
+  lo -= margin;
+  hi += margin;
+  if (hi - lo < 100) {
+    const mid = (lo + hi) / 2;
+    lo = mid - 50;
+    hi = mid + 50;
+  }
+  const xOf = (m: number) => GP.L + ((m - lo) / (hi - lo)) * (GP.R - GP.L);
+  const H = GP.LANE * ARMS.length;
+  const BOT = GP.TOP + H;
+
+  // Asphalt sits DARKER than the card so the track reads as a recess and the
+  // arm colours have something to pop against. Kerbs and lane shading are
+  // clipped to the rounded rect so nothing squares off the corners.
+  let s =
+    `<defs>${GP_CAR}<clipPath id="gptrack"><rect x="${GP.TX}" y="${GP.TOP}" width="${GP.TW}" height="${H}" rx="7"/></clipPath></defs>` +
+    `<rect x="${GP.TX}" y="${GP.TOP}" width="${GP.TW}" height="${H}" rx="7" fill="#0c1017"/>` +
+    `<g clip-path="url(#gptrack)">`;
+  // Alternate lanes get a breath of light, so which lane a car is in is legible
+  // without tracing back to the label.
+  for (let k = 0; k < ARMS.length; k += 2)
+    s += `<rect x="${GP.TX}" y="${GP.TOP + GP.LANE * k}" width="${GP.TW}" height="${GP.LANE}" fill="#8fa0c4" opacity=".045"/>`;
+  const KERB = GP.TW / 26;
+  for (let i = 0; i < 26; i++) {
+    const kx = (GP.TX + i * KERB).toFixed(1);
+    s += `<rect x="${kx}" y="${GP.TOP}" width="${KERB.toFixed(1)}" height="5" fill="${i % 2 ? "#e0484d" : "#dfe4ee"}" opacity=".55"/>`;
+    s += `<rect x="${kx}" y="${BOT - 5}" width="${KERB.toFixed(1)}" height="5" fill="${i % 2 ? "#dfe4ee" : "#e0484d"}" opacity=".55"/>`;
+  }
+  for (let k = 1; k < ARMS.length; k++)
+    s += `<line x1="${GP.TX + 6}" y1="${GP.TOP + GP.LANE * k}" x2="${GP.TX + GP.TW - 6}" y2="${GP.TOP + GP.LANE * k}" stroke="#39445c" stroke-dasharray="10 12"/>`;
+  s += `</g>`;
+
+  const step = hi - lo > 150 ? 60 : 30;
+  for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) {
+    s += `<line x1="${xOf(m).toFixed(1)}" y1="${BOT}" x2="${xOf(m).toFixed(1)}" y2="${BOT + 5}" stroke="#232c42"/>`;
+    s += `<text x="${xOf(m).toFixed(1)}" y="${BOT + 19}" fill="#69728c" font-size="10.5" text-anchor="middle">${gpClock(m)}</text>`;
+  }
+
+  // The line goes down FIRST, before any car moves. Everything after it is three
+  // attempts to stop on a target the viewer can already see.
+  if (actual != null) {
+    const fx = xOf(actual);
+    const cell = H / 14;
+    for (let r = 0; r < 14; r++)
+      for (let c = 0; c < 2; c++)
+        s += `<rect x="${(fx - 6 + c * 6).toFixed(1)}" y="${(GP.TOP + r * cell).toFixed(1)}" width="6" height="${cell.toFixed(2)}" fill="${(r + c) % 2 ? "#0a0d14" : "#f2f5fb"}"/>`;
+    s += `<text x="${fx.toFixed(1)}" y="${GP.TOP - 10}" fill="#f2f5fb" font-size="10.5" font-weight="700" text-anchor="middle">ran out ${gpClock(actual)}</text>`;
+  }
+
+  const geo: { i: number; y: number; p: number; bp: number; db: number }[] = [];
+  lanes.forEach((l, i) => {
+    const y = gpLaneY(i);
+    // Lane label sits in the gutter left of the asphalt, vertically centred on
+    // its own lane rather than floating above the kerb.
+    s += `<text x="8" y="${y + 3.5}" fill="${l.arm.c}" font-size="9.5" font-weight="700">${l.arm.label.toUpperCase()}</text>`;
+    if (l.pred == null) {
+      s += `<text x="${GP.L}" y="${y + 4}" fill="#69728c" font-size="11">${l.row ? "says it won't run out" : "no row"}</text>`;
+      return;
+    }
+    // A window can legitimately run past the ends of the axis; clip it to the
+    // asphalt instead of letting the band spill off the track.
+    if (l.early != null && l.late != null) {
+      const w0 = Math.max(GP.TX + 4, xOf(l.early));
+      const w1 = Math.min(GP.TX + GP.TW - 4, xOf(l.late));
+      if (w1 > w0)
+        s += `<rect x="${w0.toFixed(1)}" y="${y - 13}" width="${(w1 - w0).toFixed(1)}" height="26" rx="4" fill="${l.arm.c}" opacity=".12"/>`;
+    }
+    const p = xOf(l.pred);
+    const db = Math.min(GP.DB, Math.max(10, p - GP.X0 - 6));
+    geo.push({ i, y, p, bp: p - db, db });
+    s += `<rect data-skid="${i}" x="${(p - db).toFixed(1)}" y="${y - 9}" width="0" height="18" fill="#0a0d14" opacity=".45"/>`;
+    s += `<g data-car="${i}" style="color:${l.arm.c}" transform="translate(${GP.X0},${y})"><rect data-brake="${i}" x="-24" y="-7" width="4.5" height="14" rx="2" fill="#ff5d5d" opacity="0"/><use href="#gpcar" transform="scale(1.12)"/></g>`;
+    if (graded && actual != null && l.err != null) {
+      // Sits on the far side of the car from the line, vertically centred in its
+      // own lane — above the car it would land on the kerb.
+      const left = l.err < 0;
+      s += `<g data-gap="${i}" opacity="0"><text x="${(left ? p - 30 : p + 30).toFixed(1)}" y="${y + 3.5}" fill="${l.arm.c}" font-size="10.5" font-weight="700" text-anchor="${left ? "end" : "start"}">${gapLabel(l.err)}</text></g>`;
+    }
+  });
+
+  const caption = !graded
+    ? "no line yet — it drops where the last bike goes"
+    : actual == null
+      ? "nobody ran out this morning — there was no line to aim at"
+      : "the line is when the bikes actually ran out — closest to it wins";
+  s += `<text x="350" y="${BOT + 40}" fill="#69728c" font-size="10.5" text-anchor="middle">${caption}</text>`;
+  svg.innerHTML = s;
+
+  // Each arm's guess spelled out, in lane order so it cross-reads with the
+  // track above. The window is worth showing next to it: a band clipped at the
+  // edge of the asphalt tells you it runs past the view but not how far.
+  $("raceGuesses").innerHTML = lanes
+    .map((l) => {
+      const t = !l.row ? "no row" : l.pred == null ? "says it won't run out" : gpClock(l.pred);
+      const w = l.pred != null && l.early != null && l.late != null ? `${gpClock(l.early)}–${gpClock(l.late)}` : "";
+      // Every row emits all four cells, empty window included. On narrow screens
+      // these spans become `display: contents` so the whole block is one grid and
+      // the times line up down a column — a row short a cell would slide every
+      // later row into the wrong column.
+      return (
+        `<span><i style="background:${l.arm.c}"></i><span class="gp-g-name">${l.arm.label}</span>` +
+        `<b>${t}</b><em>${w}</em></span>`
+      );
+    })
+    .join("");
+  svg.setAttribute(
+    "aria-label",
+    actual == null
+      ? `Three model arms staged at the time each predicts station 345 runs out.`
+      : `Station 345 ran out at ${gpClock(actual)}. ` +
+          lanes
+            .filter((l) => l.err != null)
+            .map((l) => `${l.arm.label} ${gapLabel(l.err!)}`)
+            .join(", ") +
+          ".",
+  );
+
+  // On a narrow screen the strip scrolls. Remember where the action is — the
+  // cars and the finish line — so it can be parked in view now and re-parked
+  // whenever the viewport changes size under it.
+  const xs = geo.map((g) => g.p);
+  if (actual != null) xs.push(xOf(actual));
+  gpFocusX = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : null;
+  gpParkScroll();
+
+  // Same speed for every car; only the braking point differs. Stopping first
+  // therefore means braking earliest, which means the model guessed earliest —
+  // a faithful reading, not a ranking, because the line is already on screen.
+  gpPlan = geo.map((g) => {
+    const td = (2 * g.db) / GP.V;
+    return {
+      y: g.y,
+      p: g.p,
+      bp: g.bp,
+      db: g.db,
+      tb: (g.bp - GP.X0) / GP.V,
+      td,
+      a: GP.V / td,
+      car: svg.querySelector(`[data-car="${g.i}"]`) as SVGElement,
+      brake: svg.querySelector(`[data-brake="${g.i}"]`) as SVGElement,
+      skid: svg.querySelector(`[data-skid="${g.i}"]`) as SVGElement,
+      gap: svg.querySelector(`[data-gap="${g.i}"]`) as SVGElement | null,
+    };
+  });
+}
+
+// The resting state, and the only state that ever has to be correct: cars parked
+// on their guesses with the line drawn and the gaps labelled. The animation is
+// pure enhancement on top of it, so reduced-motion and a dead rAF both land here.
+function gpSettle() {
+  if (gpRaf != null) {
+    cancelAnimationFrame(gpRaf);
+    gpRaf = null;
+  }
+  for (const q of gpPlan) {
+    q.car.setAttribute("transform", `translate(${q.p.toFixed(1)},${q.y})`);
+    q.skid.setAttribute("width", q.db.toFixed(1));
+    q.brake.setAttribute("opacity", "0");
+    q.gap?.setAttribute("opacity", "1");
+  }
+}
+
+function gpPlay() {
+  if (!gpPlan.length) return;
+  // A hidden tab does not run rAF. Starting a run here would put the cars back
+  // on the grid and then never move them again, so returning to the dashboard
+  // would show an empty track with no result on it — worse than no animation.
+  // The auto-play fires on load, which is exactly when a restored background
+  // tab is most likely to be hidden, so this is the common case and not an edge.
+  if (document.hidden || gpReduced()) {
+    gpSettle();
+    return;
+  }
+  if (gpRaf != null) cancelAnimationFrame(gpRaf);
+  const end = Math.max(0, ...gpPlan.map((q) => q.tb + q.td));
+  for (const q of gpPlan) {
+    q.car.setAttribute("transform", `translate(${GP.X0},${q.y})`);
+    q.skid.setAttribute("width", "0");
+    q.brake.setAttribute("opacity", "0");
+    q.gap?.setAttribute("opacity", "0");
+  }
+  let t0: number | null = null;
+  const frame = (ts: number) => {
+    if (t0 == null) t0 = ts;
+    const el = (ts - t0) / 1000;
+    for (const q of gpPlan) {
+      let x: number;
+      let br = 0;
+      if (el <= q.tb) x = GP.X0 + GP.V * el;
+      else if (el <= q.tb + q.td) {
+        const d = el - q.tb;
+        x = q.bp + GP.V * d - 0.5 * q.a * d * d;
+        br = 1;
+      } else {
+        x = q.p;
+        br = Math.max(0, 1 - (el - q.tb - q.td) * 2.4);
+      }
+      q.car.setAttribute("transform", `translate(${x.toFixed(1)},${q.y})`);
+      q.brake.setAttribute("opacity", br.toFixed(2));
+      q.skid.setAttribute("width", Math.max(0, Math.min(q.db, x - q.bp)).toFixed(1));
+      if (q.gap && el > q.tb + q.td + 0.2)
+        q.gap.setAttribute("opacity", Math.min(1, (el - q.tb - q.td - 0.2) * 3).toFixed(2));
+    }
+    if (el < end + 1.2) gpRaf = requestAnimationFrame(frame);
+    else gpSettle();
+  };
+  gpRaf = requestAnimationFrame(frame);
+}
+
+// ---------- the standings ----------
+function renderTower(compare: any, winners: Map<string, string | null>, graded: number) {
+  const scores: any[] = compare.scores ?? [];
+  const ranked = ARMS.map((arm) => ({ arm, s: scores.find((x: any) => x.variant === arm.key) ?? null })).sort(
+    (a, b) => (a.s?.mae ?? Infinity) - (b.s?.mae ?? Infinity),
+  );
+  const best = ranked[0]?.s?.mae ?? null;
+  const resolution = gpResolution(compare, graded);
+  const dates = [...winners.keys()].sort();
+
+  $("raceTower").innerHTML = ranked
+    .map((r, i) => {
+      const mae = r.s?.mae ?? null;
+      const gap = mae != null && best != null ? mae - best : null;
+      // A gap the experiment cannot yet resolve is shown as approximate rather
+      // than as a number, so a lead that is pure sampling noise never renders
+      // the same way as one that has cleared the bar.
+      const soft = gap != null && resolution != null && gap < resolution;
+      const gapTxt =
+        mae == null
+          ? "—"
+          : i === 0
+            ? "<b>leader</b>"
+            : `<span class="${soft ? "gp-soft" : ""}">${soft ? "≈" : ""}+${gap!.toFixed(1)}</span>`;
+      const form = Array.from({ length: RACE_TARGET_NIGHTS }, (_, j) => {
+        const d = dates[j];
+        if (!d) return `<i class="gp-blk"></i>`;
+        const w = winners.get(d);
+        const won = w === r.arm.key;
+        return `<i class="gp-blk" style="background:${r.arm.c};opacity:${won ? 1 : 0.16}" title="${shortDate(d)} — ${won ? "closest" : w ? "beaten" : "tied"}"></i>`;
+      }).join("");
+      return `<div class="gp-row">
+        <span class="gp-pos${graded < RACE_TARGET_NIGHTS ? " gp-pos--prov" : ""}">P${i + 1}</span>
+        <i class="gp-chip" style="background:${r.arm.c}"></i>
+        <span class="gp-name">${r.arm.label}<small>${r.arm.note}</small></span>
+        <span class="gp-gap">${gapTxt}</span>
+        <span class="gp-form" role="img" aria-label="${r.arm.label}: closest on ${dates.filter((d) => winners.get(d) === r.arm.key).length} of ${dates.length} graded mornings">${form}</span>
+      </div>`;
+    })
+    .join("");
+}
+
+// The published floor is the one that applies at the full 40 mornings. Paired
+// error shrinks with sqrt(n), so today's floor is that same number scaled back
+// up — anchored to the server's constant rather than a second one invented here,
+// and equal to it exactly at n = RACE_TARGET_NIGHTS.
+function gpResolution(compare: any, graded: number): number | null {
+  const d = compare.interpretation?.detectableEffectMinutes;
+  if (typeof d !== "number" || graded <= 0) return null;
+  return d * Math.sqrt(RACE_TARGET_NIGHTS / graded);
+}
 
 function renderRace(data: { compare: any; preds: any[] } | null) {
   const card = $("raceCard");
   if (!data) return; // stays hidden — a forecaster outage must not blank the dashboard
   card.hidden = false;
+  lastRace = data;
   const { compare, preds } = data;
-
-  // The most recent night every arm has an opinion about.
-  const latest = preds.reduce((a: string | null, p: any) => (a == null || p.targetDate > a ? p.targetDate : a), null);
-  const tonight = preds.filter((p: any) => p.targetDate === latest);
-
-  // One shared time axis, so the three bars are directly comparable — a window
-  // scaled to its own arm would make the widest one look the most confident.
-  const lows = tonight.map((p: any) => hhmmToMin(p.window?.early)).filter((v: number | null) => v != null) as number[];
-  const highs = tonight.map((p: any) => hhmmToMin(p.window?.late)).filter((v: number | null) => v != null) as number[];
-  const lo = lows.length ? Math.min(...lows) : 0;
-  const hi = highs.length ? Math.max(...highs) : 0;
-  const span = hi - lo;
-  const pct = (m: number) => (span > 0 ? ((m - lo) / span) * 100 : 0);
-
-  const armRow = (arm: typeof ARMS[number]) => {
-    const p = tonight.find((x: any) => x.variant === arm.key);
-    if (!p) return `<div class="race__row"><span class="race__name">${arm.label}</span><span class="race__none">no row</span></div>`;
-    if (!p.predicted) {
-      return `<div class="race__row"><span class="race__name">${arm.label}</span>
-        <span class="race__none">says it won't run out${p.probability != null ? ` · p=${p.probability}` : ""}</span></div>`;
-    }
-    const e = hhmmToMin(p.window?.early);
-    const l = hhmmToMin(p.window?.late);
-    const mid = hhmmToMin(p.predicted.time)!;
-    const bar =
-      e != null && l != null && span > 0
-        ? `<i class="race__band" style="left:${pct(e).toFixed(1)}%;width:${(pct(l) - pct(e)).toFixed(1)}%"></i>`
-        : "";
-    return `<div class="race__row">
-      <span class="race__name">${arm.label}<small>${arm.note}</small></span>
-      <span class="race__track">${bar}<i class="race__dot" style="left:${pct(mid).toFixed(1)}%"></i></span>
-      <span class="race__time">${p.predicted.time}</span></div>`;
-  };
-
   const graded: number = compare.gradedNights ?? 0;
-  $("raceProgress").textContent = `${graded}/${RACE_TARGET_NIGHTS} nights`;
+  $("raceProgress").textContent = `${graded}/${RACE_TARGET_NIGHTS} mornings`;
 
-  // Wins are only meaningful against the control, so that is the only pairing
-  // shown. `paired` may list either arm first; orient before reading it.
-  const vsControl = (key: string) => {
-    const p = (compare.paired ?? []).find(
-      (x: any) => (x.a === key && x.b === "gaussian") || (x.a === "gaussian" && x.b === key),
-    );
-    if (!p || !p.n) return null;
-    const flip = p.a === "gaussian";
-    return { wins: flip ? p.bWins : p.aWins, n: p.n };
-  };
+  const byDate = new Map<string, any[]>();
+  for (const p of preds) {
+    if (!byDate.has(p.targetDate)) byDate.set(p.targetDate, []);
+    byDate.get(p.targetDate)!.push(p);
+  }
+  const dates = [...byDate.keys()].sort();
+  const newest = dates[dates.length - 1];
+  if (!newest) return;
 
-  const scoreRows = ARMS.map((arm) => {
-    const s = (compare.scores ?? []).find((x: any) => x.variant === arm.key);
-    if (!s || s.n === 0) return `<div class="race__srow"><span>${arm.label}</span><span class="muted">—</span><span></span></div>`;
-    const w = arm.key === "gaussian" ? null : vsControl(arm.key);
-    return `<div class="race__srow">
-      <span>${arm.label}</span>
-      <span><b>±${Math.round(s.mae)}m</b><small>${s.bias > 0 ? "runs late" : s.bias < 0 ? "runs early" : "centred"}</small></span>
-      <span>${w ? `${w.wins}/${w.n} nights` : "<small>control</small>"}</span></div>`;
-  }).join("");
+  // Two mornings are worth offering: the last one with a finish line on it, and
+  // the next one the cron has published a forecast for. Label them by DATE —
+  // "this morning" and "last finish" both had to be decoded, and at 9pm neither
+  // one obviously meant "yesterday". A date needs no decoding.
+  const isGradedOn = (d: string) => byDate.get(d)!.some((r: any) => r.finalizedAt != null);
+  const lastGraded = dates.filter(isGradedOn).pop();
+  // Deduped and oldest-first, so the finished morning always sits on the left.
+  const choices = [...new Set([lastGraded, newest].filter(Boolean) as string[])].sort();
 
-  const verdict =
-    graded < RACE_TARGET_NIGHTS
-      ? `<p class="race__note">${RACE_TARGET_NIGHTS - graded} more nights before this can be called. At this
-         sample only a gap of ~${compare.interpretation?.detectableEffectMinutes ?? 22} min would be
-         distinguishable from luck — a smaller lead is noise, however good it looks.</p>`
-      : `<p class="race__note">${graded} nights in. Read the full decision rule with
-         <code>npm run scoreboard</code> — MAE alone does not settle it.</p>`;
+  // Default to the finished morning: it is the one with a result and an
+  // animation. A previously chosen morning wins, until it falls out of the data.
+  if (!raceDate || !choices.includes(raceDate)) raceDate = lastGraded ?? newest;
+  const shown = raceDate;
+  const rows = byDate.get(shown)!;
 
-  const mismatch = (compare.seedMismatches ?? []).length
-    ? `<p class="race__note race__note--warn">⚠ ${compare.seedMismatches.length} night(s) where the arms started
-       from different 10pm inventories — that is a flaw in the experiment, not a result.</p>`
-    : "";
+  const todayKeyNow = dateKey(new Date());
+  $("raceDates").innerHTML = choices
+    .map((d) => {
+      // Only the finished morning carries a tag. "still running" was flatly
+      // wrong on a row for a date that has not arrived yet.
+      const tag = isGradedOn(d) ? " · finished" : d > todayKeyNow ? "" : d === todayKeyNow ? " · running" : "";
+      return `<button role="tab" data-date="${d}" class="${d === shown ? "is-active" : ""}">${friendlyTarget(d)}${tag}</button>`;
+    })
+    .join("");
+  const isGraded = rows.some((r: any) => r.finalizedAt != null);
 
-  $("race").innerHTML =
-    `<div class="race__head">${latest ? friendlyTarget(latest) : "tonight"}</div>` +
-    ARMS.map(armRow).join("") +
-    (graded
-      ? `<div class="race__score"><div class="race__srow race__srow--head"><span>after ${graded} night${graded === 1 ? "" : "s"}</span><span>typical miss</span><span>vs control</span></div>${scoreRows}</div>`
+  // The flag says what is true in plain words. It happens to be yellow.
+  const flag = $("raceFlag");
+  flag.hidden = false;
+  flag.className = graded >= RACE_TARGET_NIGHTS ? "gp-flag gp-flag--done" : "gp-flag";
+  flag.innerHTML =
+    graded >= RACE_TARGET_NIGHTS
+      ? `<i class="gp-flag__k"></i><b>${graded} mornings complete</b><em>the decision rule can be applied now</em>`
+      : // "Not counting yet" read as "we haven't started counting" — the opposite
+        // of the truth when 2 mornings are already on the books. Say which thing
+        // doesn't count, and don't presume a winner is coming: "no detectable
+        // difference" is a real and likely outcome here.
+        `<i class="gp-flag__dot"></i><b>Nothing decided yet</b><em>${RACE_TARGET_NIGHTS - graded} more mornings before the standings below mean anything</em>`;
+
+
+  // Rebuild the strip only when its content actually changed, so the 5-minute
+  // poll cannot restart an animation halfway through.
+  const sig = `${shown}|${isGraded}|${rows
+    .map((r: any) => `${r.variant}:${r.predicted?.minutes ?? ""}:${r.actual?.minutes ?? ""}`)
+    .sort()
+    .join(",")}`;
+  if (sig !== gpSig) {
+    gpSig = sig;
+    renderTrack(rows, isGraded);
+    // Auto-play once, for a result you have not seen yet. A race is something
+    // that arrives overnight, not something you press a button for.
+    let fresh = false;
+    try {
+      fresh = isGraded && localStorage.getItem(GP_SEEN) !== shown;
+      if (fresh) localStorage.setItem(GP_SEEN, shown);
+    } catch {
+      /* private mode — fall through to the resting state */
+    }
+    ($("raceReplay") as HTMLButtonElement).hidden = !isGraded || !gpPlan.length;
+    if (fresh && !gpReduced()) gpPlay();
+    else gpSettle();
+  }
+
+  renderTower(compare, nightWinners(byDate), graded);
+
+  const res = gpResolution(compare, graded);
+  const mism = (compare.seedMismatches ?? []).length;
+  $("raceNote").innerHTML =
+    (mism
+      ? `<span class="gp-warn">⚠ ${mism} morning${mism === 1 ? "" : "s"} where the arms started from different 10pm
+         inventories — that is a flaw in the experiment, not a result.</span>`
       : "") +
-    mismatch +
-    verdict;
+    (graded === 0
+      ? `No graded mornings yet. The first result lands once a morning has been finalized.`
+      : graded < RACE_TARGET_NIGHTS
+        ? `<b>Too close to call.</b> At ${graded} morning${graded === 1 ? "" : "s"}, a gap under
+           ±${Math.round(res!)} min means nothing at all. That bar tightens to
+           ±${compare.interpretation?.detectableEffectMinutes ?? 22} by morning ${RACE_TARGET_NIGHTS} — and a real
+           winner also has to be closest on 27 of the 40, not just on average.`
+        : `${graded} mornings in. Read the full decision rule with <code>npm run scoreboard</code> — the average
+           alone does not settle it.`);
 }
+
+$("raceReplay").addEventListener("click", () => gpPlay());
+window.addEventListener("resize", gpParkScroll);
+
+$("raceDates").addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest("button") as HTMLButtonElement | null;
+  if (!b || !lastRace || b.dataset.date === raceDate) return;
+  raceDate = b.dataset.date!;
+  renderRace(lastRace);
+  // Choosing a finished morning is a request to watch it finish. gpPlay still
+  // declines on reduced-motion or a hidden tab.
+  gpPlay();
+});
+
+// Frames stop arriving the moment the tab is backgrounded. Land on the resting
+// state rather than leaving a race frozen halfway down the track.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && gpRaf != null) gpSettle();
+});
 
 // ---------- orchestration ----------
 async function refreshNow() {

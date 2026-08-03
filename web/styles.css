@@ -821,125 +821,300 @@ body {
   text-align: center;
 }
 
-/* ---------- MODEL RACE (shadow A/B, read-only) ---------- */
-.race__head {
-  font-size: 12px;
-  color: var(--ink-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 10px;
-}
-.race__row {
-  display: grid;
-  grid-template-columns: minmax(96px, 1.1fr) minmax(0, 2fr) auto;
+/* ---------- MODEL RACE · the grand prix card (shadow A/B, read-only) ----------
+   Racing imagery, plain words. The picture carries the theme; the copy carries
+   the meaning. Nothing in this card should need motorsport knowledge to read —
+   if a sentence only makes sense once you know what a safety car is, the
+   metaphor has stopped helping. Arm colours live in main.ts (one fixed hue per
+   arm) so the standings can never repaint themselves by rank. */
+.gp-flag {
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 0;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin: 2px 0 12px;
+  padding: 7px 11px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 211, 78, 0.1);
+  border: 1px solid rgba(255, 211, 78, 0.22);
+  font-size: 11.5px;
+}
+.gp-flag b {
+  color: var(--low);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.gp-flag em {
+  font-style: normal;
+  color: var(--ink-dim);
+}
+.gp-flag__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--low);
+  flex: none;
+  animation: gpblink 1.8s ease-in-out infinite;
+}
+@keyframes gpblink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+/* Window closed: the bar stops shouting and shows a chequer instead. */
+.gp-flag--done {
+  background: var(--card-2);
+  border-color: var(--border);
+}
+.gp-flag--done b {
+  color: var(--ink);
+}
+.gp-flag__k {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  background:
+    conic-gradient(#f2f5fb 0 25%, #0a0d14 0 50%, #f2f5fb 0 75%, #0a0d14 0) 0 0 / 6px 6px;
+  border-radius: 2px;
+}
+
+.gp-strip__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  /* Two dated buttons plus ↻ replay overflow a 375px phone by a few pixels.
+     Wrapping is the safety valve — the row is never allowed to push the card
+     into a horizontal scroll. */
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.gp-dates button {
+  font-size: 11.5px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+.gp-replay {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.gp-replay:hover {
+  color: var(--ink);
+  border-color: #3a4560;
+}
+
+/* The strip keeps a floor width so the lane labels and clock ticks stay legible;
+   below that the card scrolls it horizontally rather than shrinking the type. */
+.gp-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.gp-track {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 540px;
+}
+
+/* ---------- the guesses, as numbers ----------
+   The track shows each guess as a position; this says it out loud. Plain HTML
+   rather than SVG text so it stays put when the strip scrolls, stays selectable,
+   and keeps its size when the strip is scaled down. */
+.gp-guesses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 20px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.gp-guesses > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.gp-guesses i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  align-self: center;
+  flex: none;
+}
+.gp-guesses .gp-g-name {
+  color: var(--ink-dim);
+}
+.gp-guesses b {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.gp-guesses em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- standings ---------- */
+.gp-tower {
+  margin-top: 12px;
+  padding-top: 4px;
   border-top: 1px solid var(--border-soft);
 }
-.race__row:first-of-type {
+.gp-row {
+  display: grid;
+  grid-template-columns: 24px 5px minmax(74px, 1fr) 58px minmax(110px, 1.4fr);
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.gp-row:first-child {
   border-top: 0;
 }
-.race__name {
-  display: flex;
-  flex-direction: column;
-  font-weight: 600;
-  font-size: 14px;
-}
-.race__name small {
-  font-weight: 400;
+.gp-pos {
   font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* Provisional until the window closes — the number is shown, but never as if it
+   had been earned. */
+.gp-pos--prov {
+  opacity: 0.5;
+}
+.gp-chip {
+  display: block;
+  height: 20px;
+  border-radius: 2px;
+}
+.gp-name {
+  font-size: 13px;
+  font-weight: 650;
+}
+.gp-name small {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 400;
   color: var(--ink-faint);
   line-height: 1.3;
 }
-/* The three bars share one time axis, so widths are directly comparable. */
-.race__track {
-  position: relative;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--card-2);
-}
-.race__band {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(91, 209, 192, 0.25), rgba(91, 209, 192, 0.55));
-}
-.race__dot {
-  position: absolute;
-  top: 50%;
-  width: 9px;
-  height: 9px;
-  margin: -4.5px 0 0 -4.5px;
-  border-radius: 50%;
-  background: var(--ink);
-  box-shadow: 0 0 0 2px var(--card);
-}
-.race__time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 15px;
-}
-.race__none {
-  grid-column: 2 / -1;
-  font-size: 12px;
-  color: var(--ink-faint);
-}
-.race__score {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.race__srow {
-  display: grid;
-  grid-template-columns: minmax(70px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 10px;
-  padding: 5px 0;
+.gp-gap {
+  text-align: right;
   font-size: 13px;
-}
-.race__srow span:first-child {
-  font-weight: 600;
-}
-.race__srow b {
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
-.race__srow small {
-  display: block;
+.gp-gap b {
   font-size: 11px;
-  color: var(--ink-faint);
-}
-.race__srow--head,
-.race__srow--head span:first-child {
-  font-size: 11px;
-  font-weight: 400;
+  font-weight: 600;
   color: var(--ink-faint);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
 }
-.race__note {
-  margin: 12px 0 0;
+/* A gap the experiment cannot resolve yet is dimmed and prefixed with ≈, so it
+   can never be read the same way as one that has cleared the bar. */
+.gp-soft {
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+.gp-form {
+  display: flex;
+  gap: 1.5px;
+}
+.gp-blk {
+  flex: 1;
+  min-width: 2px;
+  height: 13px;
+  border-radius: 1px;
+  background: #0d1119;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.gp-legend .gp-blk {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  vertical-align: -1px;
+  display: inline-block;
+}
+.gp-blk--won {
+  background: var(--ink-dim);
+  box-shadow: none;
+}
+.gp-blk--lost {
+  background: var(--ink-dim);
+  opacity: 0.16;
+  box-shadow: none;
+}
+.gp-legend {
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.gp-note {
+  margin: 11px 0 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--ink-faint);
 }
-.race__note--warn {
-  color: var(--low);
+.gp-note b {
+  color: var(--ink-dim);
+  font-weight: 650;
 }
-.race__note code {
+.gp-note code {
   font-size: 11px;
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--card-2);
   color: var(--ink-dim);
 }
-@media (max-width: 420px) {
-  .race__row {
-    grid-template-columns: minmax(84px, 1fr) minmax(0, 1.4fr) auto;
-    gap: 8px;
+.gp-warn {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--low);
+}
+
+@media (max-width: 520px) {
+  /* The wrapped row becomes one grid: chip, name, guess, window. Each arm's
+     span goes `display: contents` so all twelve cells belong to the SAME grid
+     and the guesses line up down a column — as three independent flex lines the
+     times sat at three different x positions and had to be hunted for. */
+  .gp-guesses {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr;
+    gap: 7px 9px;
+    align-items: baseline;
+    font-size: 12.5px;
   }
-  .race__name small {
+  .gp-guesses > span {
+    display: contents;
+  }
+  .gp-guesses em {
+    justify-self: end;
+  }
+
+  .gp-row {
+    grid-template-columns: 22px 4px minmax(0, 1fr) 54px;
+    row-gap: 7px;
+  }
+  .gp-name small {
     display: none;
+  }
+  /* The form guide is 40 cells wide — on a phone it gets the full row. */
+  .gp-form {
+    grid-column: 1 / -1;
   }
 }

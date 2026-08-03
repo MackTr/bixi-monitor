@@ -46,10 +46,30 @@
       <!-- MODEL RACE (shadow A/B from bixi-forecaster; read-only, no push) -->
       <section class="card" id="raceCard" hidden>
         <div class="card__head">
-          <h2>Model race <span class="muted">· two forecasters, same night</span></h2>
+          <h2>Model race <span class="muted">· three forecasters, one morning</span></h2>
           <span class="muted" id="raceProgress"></span>
         </div>
-        <div id="race" class="race"></div>
+        <div id="raceFlag" class="gp-flag" hidden></div>
+        <div class="gp-strip__head">
+          <!-- Buttons are built from the data: the last finished morning, and
+               tomorrow's forecast once the 10pm cron has posted it. -->
+          <div class="toggle gp-dates" role="tablist" id="raceDates"></div>
+          <button id="raceReplay" class="gp-replay" hidden>↻ replay</button>
+        </div>
+        <div class="gp-scroll">
+          <svg id="raceTrack" class="gp-track" viewBox="0 0 700 208" role="img" aria-label="Model race strip"></svg>
+        </div>
+        <!-- The guesses as numbers. Lives outside the scrolling strip on purpose:
+             on a phone the strip scrolls itself to the finish line, which would
+             carry any in-SVG time label off screen. -->
+        <div id="raceGuesses" class="gp-guesses"></div>
+        <div id="raceTower" class="gp-tower"></div>
+        <div class="legend legend--row gp-legend">
+          <span><i class="gp-blk gp-blk--won"></i>closest that morning</span>
+          <span><i class="gp-blk gp-blk--lost"></i>beaten</span>
+          <span><i class="gp-blk"></i>not run yet</span>
+        </div>
+        <p id="raceNote" class="gp-note"></p>
       </section>
 
       <!-- TODAY -->
