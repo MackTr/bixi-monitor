@@ -855,6 +855,31 @@ function nightWinners(byDate: Map<string, any[]>): Map<string, string | null> {
   return out;
 }
 
+// The finish line, before the forecaster has drawn it.
+//
+// `actual` is written by the 10pm grading run, so a morning that emptied at 8am
+// carries no line for the rest of the day — while the monitor watched the last
+// bike go in real time. This reads that same moment off the monitor's own empty
+// episodes and drops the line early, marked unofficial until the grade lands.
+//
+// The rule is provisionalToday()'s, deliberately reused rather than restated:
+// the first empty episode that STARTED today is the day's first bikes>0→0
+// transition, which is the forecaster's runout_minutes. Two provisional
+// gradings on one page that could disagree would be worse than neither. It
+// agrees with the official one where both exist — Aug 1 601, Aug 2 707, equal
+// to the graded rows to the minute.
+//
+// Today only, and nothing downstream consumes it: standings, MAE, the form
+// guide and the graded count stay the forecaster's. A provisional line can
+// change the strip; it can never change the experiment.
+function provisionalRunout(date: string): number | null {
+  if (date !== dateKey(new Date())) return null;
+  const eps = ((lastEpEmpty?.episodes ?? []) as any[])
+    .filter((e) => dateKey(new Date(e.start)) === date)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  return eps.length ? hhmmToMins(clockLabel(eps[0].start)) : null;
+}
+
 // ---------- the strip ----------
 // Geometry in viewBox units; the SVG scales to the card. V and DB are the car's
 // speed and braking distance — all three cars run at the SAME speed so that the
@@ -902,7 +927,16 @@ let gpFocusX: number | null = null; // centre of the action, in viewBox units
 // changes without a refetch. `raceDate` survives the 5-minute poll so a chosen
 // morning is not yanked back to the default under the reader.
 let raceDate: string | null = null;
+// The local date that choice was made under. `raceDate` is sticky by design, so
+// without this a dashboard left open overnight — a Home-Screen PWA is left open
+// for days — would still be parked on the morning that was current when it was
+// opened. Not equal to today = the selection has expired, whoever made it.
+let raceDay: string | null = null;
 let lastRace: { compare: any; preds: any[] } | null = null;
+// The monitor's own empty episodes, for the provisional finish line below. Set
+// in refreshAll beside lastToday/lastStats; the strip redraws from it on a tab
+// click too, so it has to outlive the render that fetched it.
+let lastEpEmpty: any = null;
 
 // Keep the interesting part of the strip in view when it is too wide to fit.
 // Called on render and again on resize: a phone rotated from portrait to
@@ -920,7 +954,7 @@ function gpParkScroll() {
 
 const gapLabel = (err: number) => (err === 0 ? "on the line" : err < 0 ? `${-err}m early` : `${err}m late`);
 
-function renderTrack(rows: any[], graded: boolean) {
+function renderTrack(rows: any[], graded: boolean, prov: number | null) {
   const svg = $("raceTrack");
   const lanes = ARMS.map((arm) => {
     const r = rows.find((x: any) => x.variant === arm.key) ?? null;
@@ -936,9 +970,20 @@ function renderTrack(rows: any[], graded: boolean) {
 
   // One actual for the whole morning. Arms that were graded against different
   // truths are a fault in the experiment, not a result — draw no line at all
-  // rather than pick one of them to believe.
+  // rather than pick one of them to believe. The monitor's own sighting fills in
+  // only where the forecaster has said nothing yet; it is not a casting vote in
+  // a disagreement, so a mismatch still draws nothing.
   const truths = new Set(rows.filter((r: any) => r.actual != null).map((r: any) => r.actual.minutes as number));
-  const actual = truths.size === 1 ? [...truths][0] : null;
+  const unofficial = truths.size === 0 && prov != null;
+  const actual = truths.size === 1 ? [...truths][0] : unofficial ? prov : null;
+
+  // The server's errorMinutes is exactly predicted − actual (checked against the
+  // graded rows: gaussian 617 − 707 = −90), so a provisional line can be scored
+  // with the server's own subtraction rather than a second definition of error.
+  // Negative = braked early, which is what gapLabel below reads. NOTE this is
+  // the opposite sign convention from missLabel/scoreRow in the track record,
+  // which is about when the bikes went, not about where the car stopped.
+  if (unofficial) for (const l of lanes) if (l.pred != null) l.err = l.pred - actual!;
 
   // Anchor the clock on the things that are certainly times — the point
   // forecasts and the actual — then let windows widen it only if they land
@@ -1002,13 +1047,25 @@ function renderTrack(rows: any[], graded: boolean) {
 
   // The line goes down FIRST, before any car moves. Everything after it is three
   // attempts to stop on a target the viewer can already see.
+  //
+  // A provisional line is the same line, ghosted: the run-out is a fact either
+  // way, and washing the chequer out is enough to say the grade behind it is not
+  // in yet without inventing a second kind of finish line.
   if (actual != null) {
     const fx = xOf(actual);
     const cell = H / 14;
+    s += `<g opacity="${unofficial ? ".55" : "1"}">`;
     for (let r = 0; r < 14; r++)
       for (let c = 0; c < 2; c++)
         s += `<rect x="${(fx - 6 + c * 6).toFixed(1)}" y="${(GP.TOP + r * cell).toFixed(1)}" width="6" height="${cell.toFixed(2)}" fill="${(r + c) % 2 ? "#0a0d14" : "#f2f5fb"}"/>`;
-    s += `<text x="${fx.toFixed(1)}" y="${GP.TOP - 10}" fill="#f2f5fb" font-size="10.5" font-weight="700" text-anchor="middle">ran out ${gpClock(actual)}</text>`;
+    s += `</g>`;
+    // Stacked, not "11:53a · unofficial" on one line: the line sits near the
+    // right of the strip, which on a phone is scrolled almost to the edge of the
+    // window, and the wider single line carried the TIME out of view. Two short
+    // lines stay inside it.
+    s += `<text x="${fx.toFixed(1)}" y="${GP.TOP - (unofficial ? 21 : 10)}" fill="${unofficial ? "#9aa6c0" : "#f2f5fb"}" font-size="10.5" font-weight="700" text-anchor="middle">ran out ${gpClock(actual)}</text>`;
+    if (unofficial)
+      s += `<text x="${fx.toFixed(1)}" y="${GP.TOP - 10}" fill="#69728c" font-size="9" text-anchor="middle">unofficial</text>`;
   }
 
   const geo: { i: number; y: number; p: number; bp: number; db: number }[] = [];
@@ -1034,7 +1091,7 @@ function renderTrack(rows: any[], graded: boolean) {
     geo.push({ i, y, p, bp: p - db, db });
     s += `<rect data-skid="${i}" x="${(p - db).toFixed(1)}" y="${y - 9}" width="0" height="18" fill="#0a0d14" opacity=".45"/>`;
     s += `<g data-car="${i}" style="color:${l.arm.c}" transform="translate(${GP.X0},${y})"><rect data-brake="${i}" x="-24" y="-7" width="4.5" height="14" rx="2" fill="#ff5d5d" opacity="0"/><use href="#gpcar" transform="scale(1.12)"/></g>`;
-    if (graded && actual != null && l.err != null) {
+    if (actual != null && l.err != null) {
       // Sits on the far side of the car from the line, vertically centred in its
       // own lane — above the car it would land on the kerb.
       const left = l.err < 0;
@@ -1042,36 +1099,54 @@ function renderTrack(rows: any[], graded: boolean) {
     }
   });
 
-  const caption = !graded
-    ? "no line yet — it drops where the last bike goes"
-    : actual == null
-      ? "nobody ran out this morning — there was no line to aim at"
-      : "the line is when the bikes actually ran out — closest to it wins";
+  // Keyed on the line, not on the grade: "graded" alone could not say the one
+  // thing that is now possible — a real line with no official grade behind it.
+  const caption =
+    actual != null
+      ? unofficial
+        ? "drawn live from the station — tonight's grade makes it official"
+        : "the line is when the bikes actually ran out — closest to it wins"
+      : graded
+        ? "nobody ran out this morning — there was no line to aim at"
+        : "no line yet — it drops where the last bike goes";
   s += `<text x="350" y="${BOT + 40}" fill="#69728c" font-size="10.5" text-anchor="middle">${caption}</text>`;
   svg.innerHTML = s;
 
   // Each arm's guess spelled out, in lane order so it cross-reads with the
   // track above. The window is worth showing next to it: a band clipped at the
   // edge of the asphalt tells you it runs past the view but not how far.
-  $("raceGuesses").innerHTML = lanes
-    .map((l) => {
-      const t = !l.row ? "no row" : l.pred == null ? "says it won't run out" : gpClock(l.pred);
-      const w = l.pred != null && l.early != null && l.late != null ? `${gpClock(l.early)}–${gpClock(l.late)}` : "";
-      // Every row emits all four cells, empty window included. On narrow screens
-      // these spans become `display: contents` so the whole block is one grid and
-      // the times line up down a column — a row short a cell would slide every
-      // later row into the wrong column.
-      return (
-        `<span><i style="background:${l.arm.c}"></i><span class="gp-g-name">${l.arm.label}</span>` +
-        `<b>${t}</b><em>${w}</em></span>`
-      );
-    })
-    .join("");
+  // The run-out itself leads the guesses it is measured against — same reason
+  // the guesses are out here and not in the SVG. The strip parks near the finish
+  // line, and a morning where every arm braked hours early is wide enough that
+  // the phone's scroll window carries the in-SVG label off the edge. This is the
+  // one number the whole card is about; it does not get to scroll away. Four
+  // cells like every other row, empty <em> included, or the grid shifts.
+  const lineEntry =
+    actual == null
+      ? ""
+      : `<span class="gp-g-line${unofficial ? " gp-g-line--prov" : ""}"><i class="gp-g-flag"></i>` +
+        `<span class="gp-g-name">Ran out</span><b>${gpClock(actual)}</b><em>${unofficial ? "unofficial" : ""}</em></span>`;
+  $("raceGuesses").innerHTML =
+    lineEntry +
+    lanes
+      .map((l) => {
+        const t = !l.row ? "no row" : l.pred == null ? "says it won't run out" : gpClock(l.pred);
+        const w = l.pred != null && l.early != null && l.late != null ? `${gpClock(l.early)}–${gpClock(l.late)}` : "";
+        // Every row emits all four cells, empty window included. On narrow
+        // screens these spans become `display: contents` so the whole block is
+        // one grid and the times line up down a column — a row short a cell
+        // would slide every later row into the wrong column.
+        return (
+          `<span><i style="background:${l.arm.c}"></i><span class="gp-g-name">${l.arm.label}</span>` +
+          `<b>${t}</b><em>${w}</em></span>`
+        );
+      })
+      .join("");
   svg.setAttribute(
     "aria-label",
     actual == null
       ? `Three model arms staged at the time each predicts station 345 runs out.`
-      : `Station 345 ran out at ${gpClock(actual)}. ` +
+      : `Station 345 ran out at ${gpClock(actual)}${unofficial ? ", not yet officially graded" : ""}. ` +
           lanes
             .filter((l) => l.err != null)
             .map((l) => `${l.arm.label} ${gapLabel(l.err!)}`)
@@ -1124,16 +1199,24 @@ function gpSettle() {
   }
 }
 
-function gpPlay() {
-  if (!gpPlan.length) return;
+// Returns whether the race actually started, so the caller can tell a run from a
+// refusal — the auto-play below only spends its one-shot token on a run.
+//
+// `force` is for the ↻ button. prefers-reduced-motion means "do not move things
+// at me that I did not ask for", and it rightly kills the auto-play — but a
+// press of a control labelled REPLAY is the asking. Declining that read as a
+// dead button, which is how this surfaced: nothing happened, on every click.
+// A hidden tab still refuses no matter what, because it physically cannot run.
+function gpPlay(force = false): boolean {
+  if (!gpPlan.length) return false;
   // A hidden tab does not run rAF. Starting a run here would put the cars back
   // on the grid and then never move them again, so returning to the dashboard
   // would show an empty track with no result on it — worse than no animation.
   // The auto-play fires on load, which is exactly when a restored background
   // tab is most likely to be hidden, so this is the common case and not an edge.
-  if (document.hidden || gpReduced()) {
+  if (document.hidden || (!force && gpReduced())) {
     gpSettle();
-    return;
+    return false;
   }
   if (gpRaf != null) cancelAnimationFrame(gpRaf);
   const end = Math.max(0, ...gpPlan.map((q) => q.tb + q.td));
@@ -1169,6 +1252,28 @@ function gpPlay() {
     else gpSettle();
   };
   gpRaf = requestAnimationFrame(frame);
+  return true;
+}
+
+// The morning whose race is still owed an auto-play, or null. A tab that loads
+// in the background cannot run rAF, and Chrome reports `hidden` for a window it
+// considers occluded too — so "there is a result you have not watched" has to
+// outlive the render that discovered it.
+let gpOwed: string | null = null;
+
+// Spend the one-shot token only on a race that actually RAN. Marking a morning
+// seen and then refusing to animate it burned the auto-play on a race nobody
+// watched, and nothing ever offered it again — the strip only re-renders when
+// the data changes, which for a finished morning is never.
+function gpAutoPlay(): boolean {
+  if (!gpOwed || !gpPlay()) return false;
+  try {
+    localStorage.setItem(GP_SEEN, gpOwed);
+  } catch {
+    /* private mode — it simply replays next time, which is the harmless way round */
+  }
+  gpOwed = null;
+  return true;
 }
 
 // ---------- the standings ----------
@@ -1241,31 +1346,58 @@ function renderRace(data: { compare: any; preds: any[] } | null) {
   const newest = dates[dates.length - 1];
   if (!newest) return;
 
-  // Two mornings are worth offering: the last one with a finish line on it, and
-  // the next one the cron has published a forecast for. Label them by DATE —
+  // Mornings worth offering: the last one with a finish line on it, the one
+  // happening now, and the next one the cron has published a forecast for.
+  // Today is named explicitly rather than left to fall out of the other two —
+  // between the 10pm run and the next grade it is neither. Label them by DATE:
   // "this morning" and "last finish" both had to be decoded, and at 9pm neither
   // one obviously meant "yesterday". A date needs no decoding.
+  const todayKeyNow = dateKey(new Date());
   const isGradedOn = (d: string) => byDate.get(d)!.some((r: any) => r.finalizedAt != null);
   const lastGraded = dates.filter(isGradedOn).pop();
+  const today = byDate.has(todayKeyNow) ? todayKeyNow : undefined;
   // Deduped and oldest-first, so the finished morning always sits on the left.
-  const choices = [...new Set([lastGraded, newest].filter(Boolean) as string[])].sort();
+  const choices = [...new Set([lastGraded, today, newest].filter(Boolean) as string[])].sort();
 
-  // Default to the finished morning: it is the one with a result and an
-  // animation. A previously chosen morning wins, until it falls out of the data.
-  if (!raceDate || !choices.includes(raceDate)) raceDate = lastGraded ?? newest;
+  // Default to the latest morning that has actually happened — today whenever
+  // the cron has published for it, which is the race you are in and which the
+  // provisional line below can finish hours before the forecaster grades it.
+  // Sorting for recency rather than reaching for `today` directly also covers
+  // the night the cron misses: the most recent real morning stands in, instead
+  // of skipping back past it to the last GRADED one. A future date is only ever
+  // the default when it is the only thing on offer.
+  //
+  // A chosen morning survives the 5-minute poll, but not the date rolling over:
+  // at midnight yesterday stops being the current race, whoever picked it.
+  if (!raceDate || !choices.includes(raceDate) || raceDay !== todayKeyNow) {
+    raceDate = choices.filter((d) => d <= todayKeyNow).pop() ?? newest;
+    raceDay = todayKeyNow;
+  }
   const shown = raceDate;
   const rows = byDate.get(shown)!;
+  const isGraded = rows.some((r: any) => r.finalizedAt != null);
+  // Once per render, not once per use: it walks every episode of the last 30
+  // days through Intl to bucket them by local day.
+  const todayRunout = provisionalRunout(todayKeyNow);
+  const prov = shown === todayKeyNow ? todayRunout : null;
 
-  const todayKeyNow = dateKey(new Date());
   $("raceDates").innerHTML = choices
     .map((d) => {
-      // Only the finished morning carries a tag. "still running" was flatly
-      // wrong on a row for a date that has not arrived yet.
-      const tag = isGradedOn(d) ? " · finished" : d > todayKeyNow ? "" : d === todayKeyNow ? " · running" : "";
+      // A date that has not arrived yet carries no tag — "still running" was
+      // flatly wrong there. Today's says whether the bikes have gone, which is
+      // the whole question the card exists to answer.
+      const tag = isGradedOn(d)
+        ? " · finished"
+        : d > todayKeyNow
+          ? ""
+          : d === todayKeyNow
+            ? todayRunout != null
+              ? " · ran out"
+              : " · running"
+            : "";
       return `<button role="tab" data-date="${d}" class="${d === shown ? "is-active" : ""}">${friendlyTarget(d)}${tag}</button>`;
     })
     .join("");
-  const isGraded = rows.some((r: any) => r.finalizedAt != null);
 
   // The flag says what is true in plain words. It happens to be yellow.
   const flag = $("raceFlag");
@@ -1283,25 +1415,29 @@ function renderRace(data: { compare: any; preds: any[] } | null) {
 
   // Rebuild the strip only when its content actually changed, so the 5-minute
   // poll cannot restart an animation halfway through.
-  const sig = `${shown}|${isGraded}|${rows
+  // `prov` belongs in here: the run-out can land under an open dashboard, and
+  // the strip has to redraw when it does.
+  const sig = `${shown}|${isGraded}|${prov ?? ""}|${rows
     .map((r: any) => `${r.variant}:${r.predicted?.minutes ?? ""}:${r.actual?.minutes ?? ""}`)
     .sort()
     .join(",")}`;
   if (sig !== gpSig) {
     gpSig = sig;
-    renderTrack(rows, isGraded);
-    // Auto-play once, for a result you have not seen yet. A race is something
-    // that arrives overnight, not something you press a button for.
-    let fresh = false;
+    renderTrack(rows, isGraded, prov);
+    // Auto-play once, for a result you have not seen yet — a provisional line
+    // counts, since that is the moment the race is actually decided. Keyed on
+    // the date, so tonight's official grade redraws quietly instead of replaying
+    // a race already watched. If the browser will not animate right now the debt
+    // is remembered rather than written off; visibilitychange settles it.
+    const hasLine = isGraded || prov != null;
+    gpOwed = null;
     try {
-      fresh = isGraded && localStorage.getItem(GP_SEEN) !== shown;
-      if (fresh) localStorage.setItem(GP_SEEN, shown);
+      if (hasLine && localStorage.getItem(GP_SEEN) !== shown) gpOwed = shown;
     } catch {
-      /* private mode — fall through to the resting state */
+      /* private mode — no bookkeeping, and the resting state is still correct */
     }
-    ($("raceReplay") as HTMLButtonElement).hidden = !isGraded || !gpPlan.length;
-    if (fresh && !gpReduced()) gpPlay();
-    else gpSettle();
+    ($("raceReplay") as HTMLButtonElement).hidden = !hasLine || !gpPlan.length;
+    if (!gpAutoPlay()) gpSettle();
   }
 
   renderTower(compare, nightWinners(byDate), graded);
@@ -1324,7 +1460,7 @@ function renderRace(data: { compare: any; preds: any[] } | null) {
            alone does not settle it.`);
 }
 
-$("raceReplay").addEventListener("click", () => gpPlay());
+$("raceReplay").addEventListener("click", () => gpPlay(true));
 window.addEventListener("resize", gpParkScroll);
 
 $("raceDates").addEventListener("click", (e) => {
@@ -1338,12 +1474,18 @@ $("raceDates").addEventListener("click", (e) => {
 });
 
 // Frames stop arriving the moment the tab is backgrounded. Land on the resting
-// state rather than leaving a race frozen halfway down the track.
+// state rather than leaving a race frozen halfway down the track — and on the
+// way back in, run any race that was owed one because the tab was hidden when
+// its result arrived.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && gpRaf != null) gpSettle();
+  if (document.hidden) {
+    if (gpRaf != null) gpSettle();
+  } else gpAutoPlay();
 });
 
 // ---------- orchestration ----------
+let lastRefresh = 0;
+
 async function refreshNow() {
   try {
     renderHero(await api("now"));
@@ -1362,9 +1504,12 @@ async function refreshAll() {
     fetchTrackRecord(), // [] on failure — same deal
     fetchRace(), // null on failure — the race card stays hidden, nothing else moves
   ]);
-  // assign both before rendering: today + episodes read lastStats for holiday tags
+  // assign all three before rendering: today + episodes read lastStats for
+  // holiday tags, and the race reads lastEpEmpty for its provisional finish line
   lastToday = today;
   lastStats = stats;
+  lastEpEmpty = epEmpty;
+  lastRefresh = Date.now();
   renderHero(n);
   renderToday();
   renderHeatmap();
@@ -1464,6 +1609,15 @@ $("todayToggle").addEventListener("click", (e) => {
     .querySelectorAll("button")
     .forEach((x) => x.classList.toggle("is-active", x === b));
   renderToday();
+});
+
+// iOS suspends a backgrounded PWA's timers, so the Home-Screen app comes back
+// showing whatever was on screen when it was put away — and after midnight that
+// includes the wrong morning, which is the case the default above exists to fix.
+// Catch it up on the way back in, rate-limited so flicking between tabs does not
+// hammer the API.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - lastRefresh > 60_000) refreshAll().catch(() => {});
 });
 
 refreshAll().catch((e) => console.error(e));

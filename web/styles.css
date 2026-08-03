@@ -964,6 +964,23 @@ body {
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
 }
+/* The finish line as a number. Its swatch is the chequer from the strip so the
+   two read as the same thing, and it leads the arms it is the target for. */
+.gp-guesses i.gp-g-flag {
+  background: conic-gradient(#f2f5fb 25%, #0a0d14 0 50%, #f2f5fb 0 75%, #0a0d14 0);
+  background-size: 8px 8px;
+  border-radius: 1px;
+}
+.gp-g-line .gp-g-name {
+  color: var(--ink);
+}
+/* Provisional: washed out to the same degree as the line on the strip. */
+.gp-g-line--prov i.gp-g-flag {
+  opacity: 0.55;
+}
+.gp-g-line--prov b {
+  color: var(--ink-dim);
+}
 
 /* ---------- standings ---------- */
 .gp-tower {
