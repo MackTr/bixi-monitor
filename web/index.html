@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0e16" />
     <title>BIXI · Regina / de Verdun</title>
+    <meta
+      name="description"
+      content="Live availability and nightly run-out forecasts for BIXI station 345, with three models graded against each other."
+    />
+    <!-- Link previews (LinkedIn/Slack/iMessage refuse a link they can't build a card from). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bixi-monitor.bixi.workers.dev/" />
+    <meta property="og:title" content="BIXI availability forecast" />
+    <meta
+      property="og:description"
+      content="Predicts when a Montreal bike station runs out, updated nightly."
+    />
+    <meta property="og:image" content="https://bixi-monitor.bixi.workers.dev/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚲</text></svg>" />
     <!-- Home-Screen app + Web Push (predictions arrive as notifications) -->
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -78,6 +92,7 @@
           <h2 id="todayTitle">When bikes run out</h2>
           <div class="toggle" role="tablist" id="todayToggle">
             <button data-view="focus" class="is-active" role="tab">run-out window</button>
+            <button data-view="recent" role="tab">3h</button>
             <button data-view="full" role="tab">24h</button>
           </div>
         </div>

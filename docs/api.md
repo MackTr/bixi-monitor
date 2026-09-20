@@ -39,16 +39,20 @@ Raw series for charts. `from`/`to` accept ISO-8601 or epoch (s or ms); default =
     "ebikes": 1, "trailer": 0, "mechanical": 2, "docks": 16, "status": "ok" } ] }
 ```
 
-### `GET /stations/{id}/episodes?type&days`
+### `GET /stations/{id}/episodes?type&days&asOf`
 Maximal empty/full runs. `type` ∈ `empty | full` (default `empty`). `days` 1–365 (default 30).
 Most recent first; an open episode has `end: null, ongoing: true`.
+`asOf` (ISO-8601 or epoch) moves the right edge of the window off the clock and back to a past
+instant — nothing observed after it is counted, and `days` is measured back from it. Default now.
 ```json
 { "station": "345", "type": "empty", "days": 30, "count": 8,
   "episodes": [ { "start": "...", "end": "...", "ongoing": false, "minutes": 93 } ] }
 ```
 
-### `GET /stations/{id}/stats?days&tz`
-Heatmap + weekday-morning behaviour. `tz` default `America/Toronto`. Heatmap grids are
+### `GET /stations/{id}/stats?days&tz&asOf`
+Heatmap + weekday-morning behaviour. `tz` default `America/Toronto`. `asOf` behaves exactly as it
+does on `/episodes` above: it pins the right edge of the window, so a past night can be replayed on
+the aggregates as they stood that evening rather than as they stand now. Heatmap grids are
 `[weekday 0=Sun..6=Sat][hour 0..23]`; `avgBikes`/`pctEmpty` may be `null` where there's no coverage.
 `morning.runoutByDow[0..6]` is the **average time bikes run out** (first had-bikes→zero transition)
 for each weekday, as minutes-since-midnight + `"HH:MM"`, with the day count (`null` if it never did).
@@ -76,3 +80,8 @@ are listed in `excludedHolidays`. Episodes and raw observations are unaffected.
   (GBFS's term; `vehicle_type_id 14`), which the legacy feed silently folded into the plain count.
 - Observations are stored **on change** (+ a ≥15-min heartbeat), so charts should **step-hold** the
   last value forward — that's the true station behaviour, not interpolation.
+- **`asOf` is a leakage control, not a filter.** `/observations` has always taken `to`; `/episodes`
+  and `/stats` pinned their window to the clock until `asOf` was added, which made replaying a past
+  night through them return aggregates containing the morning being replayed. `bixi-mcp` clamps every
+  tool result to an `asOf` so `bixi-agent` cannot see past its own prediction time, and these two
+  endpoints are where that clamp has to be honoured server-side rather than trimmed after the fact.

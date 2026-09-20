@@ -37,6 +37,24 @@ function clampDays(v: string | null, def: number): number {
   return Math.min(Math.max(n, 1), 365);
 }
 
+// The right edge of an analytic window. Defaults to now, which is what every
+// existing client already gets — but `?asOf=` lets a caller ask what these
+// aggregates looked like at a past instant, and that is not a convenience.
+//
+// `/observations` has always taken `to`, so raw history could be read honestly
+// at a past instant. `/episodes` and `/stats` could not: both pinned their
+// window to the clock, so replaying a past night through them returned
+// aggregates containing the very morning being predicted. bixi-agent's tools
+// must refuse anything observed after their `asOf`, and the alternative —
+// recomputing episodes and the heatmap outside this file — would fork the
+// definition the dashboard and the scoreboard already agree on.
+//
+// A future asOf is not an error; it reads as now, since no observation exists
+// past the present.
+function asOfOrNow(url: URL): number {
+  return parseTime(url.searchParams.get("asOf")) ?? Math.floor(Date.now() / 1000);
+}
+
 export async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (request.method !== "GET") return fail(405, "method not allowed");
@@ -179,13 +197,14 @@ async function observations(env: Env, station: Station, url: URL): Promise<Respo
 async function episodes(env: Env, station: Station, url: URL): Promise<Response> {
   const type = url.searchParams.get("type") === "full" ? "full" : "empty";
   const days = clampDays(url.searchParams.get("days"), 30);
-  const t = Math.floor(Date.now() / 1000);
+  const t = asOfOrNow(url);
   const rows = await loadRows(env, station.id, t - days * 86400, t);
   const eps = computeEpisodes(rows, type, t);
   return json({
     station: station.id,
     type,
     days,
+    asOf: iso(t),
     count: eps.length,
     episodes: eps.map((e) => ({
       start: iso(e.start),
@@ -199,7 +218,7 @@ async function episodes(env: Env, station: Station, url: URL): Promise<Response>
 async function stats(env: Env, station: Station, url: URL): Promise<Response> {
   const days = clampDays(url.searchParams.get("days"), 30);
   const tz = url.searchParams.get("tz") || "America/Toronto";
-  const t = Math.floor(Date.now() / 1000);
+  const t = asOfOrNow(url);
   const rows = await loadRows(env, station.id, t - days * 86400, t);
   const out = computeStats(rows, {
     tz,
@@ -211,7 +230,7 @@ async function stats(env: Env, station: Station, url: URL): Promise<Response> {
     commuteEnd: "08:30",
     holidayName,
   });
-  return json({ station: station.id, days, tz, capacity: station.capacity, ...out });
+  return json({ station: station.id, days, tz, asOf: iso(t), capacity: station.capacity, ...out });
 }
 
 async function health(env: Env): Promise<Response> {

@@ -135,9 +135,10 @@ function renderHero(n: any) {
   $("updated").textContent = `updated ${relTime(n.ageSeconds)}`;
 }
 
-// ---------- TODAY (SVG, focus on the scarce window or full 24h) ----------
+// ---------- TODAY (SVG, focus on the scarce window, the last 3h, or full 24h) ----------
 let lastToday: any = null;
-let todayView: "focus" | "full" = "focus";
+let todayView: "focus" | "recent" | "full" = "focus";
+const RECENT_SECONDS = 3 * 3600;
 
 function renderToday() {
   const res = lastToday;
@@ -161,21 +162,26 @@ function renderToday() {
   };
   const scarce = spanOf((s) => s.bikes <= 0) ?? spanOf((s) => s.bikes <= 3);
   const focusing = todayView === "focus" && !!scarce;
+  const recent = todayView === "recent";
 
   let winFrom = dataFrom, winTo = dataTo;
   if (focusing && scarce) {
     winFrom = Math.max(dataFrom, scarce[0] - 90 * 60); // show the run-down before
     winTo = Math.min(dataTo, scarce[1] + 60 * 60); // …and the recovery after
+  } else if (recent) {
+    winFrom = Math.max(dataFrom, dataTo - RECENT_SECONDS);
   }
   const span = Math.max(60, winTo - winFrom);
 
   // toggle availability + labels
   const focusBtn = document.querySelector('#todayToggle button[data-view="focus"]') as HTMLButtonElement | null;
   if (focusBtn) focusBtn.disabled = !scarce;
-  $("todayTitle").textContent = focusing ? "When bikes run out" : "Last 24 hours";
+  $("todayTitle").textContent = focusing ? "When bikes run out" : recent ? "Last 3 hours" : "Last 24 hours";
   const todayHol = holidayOn(dateKey(new Date())); // holidays skew the usual pattern — say so
   $("todayRange").textContent =
-    (focusing
+    // clock times for the zoomed windows — at that scale "which 3 hours" is the
+    // question; the 24h view is the whole data span, so naming it is enough
+    (focusing || recent
       ? `${clockLabel(new Date(winFrom * 1000).toISOString())}–${clockLabel(new Date(winTo * 1000).toISOString())}`
       : "last 24 h") + (todayHol ? ` · ${todayHol}` : "");
 
@@ -212,7 +218,7 @@ function renderToday() {
       <text x="${x(t).toFixed(1)}" y="${H - 6}" fill="var(--ink-faint)" font-size="10" text-anchor="middle">${clockLabel(new Date(t * 1000).toISOString())}</text>`;
   }
 
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="bikes available, ${focusing ? "zoomed to when bikes run out" : "over the last 24 hours"}">
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="bikes available, ${focusing ? "zoomed to when bikes run out" : recent ? "over the last 3 hours" : "over the last 24 hours"}">
     <line x1="${padL}" y1="${y(cap)}" x2="${W - padR}" y2="${y(cap)}" stroke="var(--border-soft)"/>
     <line x1="${padL}" y1="${y(0)}" x2="${W - padR}" y2="${y(0)}" stroke="var(--border)"/>
     <text x="2" y="${y(cap) + 3}" fill="var(--ink-faint)" font-size="10">${cap}</text>
